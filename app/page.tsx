@@ -35,6 +35,8 @@ const navItems: { id: View; label: string; icon: string }[] = [
 
 export default function VivaApp() {
   const [role, setRole] = useState<"student" | "admin" | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<{email:string;fullName:string;role:"student"|"admin"}|null>(null);
   const [view, setView] = useState<View>("home");
   const [sessionOpen, setSessionOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -55,6 +57,8 @@ export default function VivaApp() {
       id: doc.id, name: doc.fileName, size: formatBytes(doc.sizeBytes), status: titleCase(doc.status), date: formatDate(doc.createdAt), error: doc.errorMessage,
     })))).catch(() => { /* Local bindings are unavailable until configured; upload will show the actionable error. */ });
   }, []);
+
+  useEffect(()=>{fetch("/api/auth").then(async r=>{if(!r.ok)throw new Error();return r.json();}).then(d=>{setCurrentUser(d.user);setRole(d.user.role);setView(d.user.role==="admin"?"admin":"home");}).catch(()=>{}).finally(()=>setAuthLoading(false));},[]);
 
   useEffect(() => { fetch("/api/assignments").then((r) => r.json()).then((data) => { setAssignedTopics(data.topics ?? []); setSelectedTopic((current) => current ?? data.topics?.[0] ?? null); }).catch(() => {}); }, [view]);
 
@@ -111,14 +115,15 @@ export default function VivaApp() {
     }
   }
 
-  if (!role) return <RoleChooser onChoose={(chosen) => { setRole(chosen); setView(chosen === "admin" ? "admin" : "home"); }} />;
+  if(authLoading)return <main className="role-page"><div className="role-panel"><Brand/><p>Checking your Vivawise account…</p></div></main>;
+  if (!role) return <AuthScreen onAuthenticated={(user) => { setCurrentUser(user);setRole(user.role);setView(user.role === "admin" ? "admin" : "home"); }} />;
 
   return (
     <main className="app-shell">
       <aside className="sidebar">
         <Brand />
         <nav className="main-nav" aria-label="Main navigation">
-          {navItems.map((item) => (
+          {navItems.filter((item) => role === "admin" ? item.id === "admin" : item.id !== "admin").map((item) => (
             <button
               className={view === item.id ? "nav-item active" : "nav-item"}
               key={item.id}
@@ -136,10 +141,10 @@ export default function VivaApp() {
         </div>
         <div className="profile-chip">
           <div className="avatar">AS</div>
-          <div><strong>Arjun Sharma</strong><span>B.Tech · Semester IV</span></div>
+          <div><strong>{currentUser?.fullName||"Vivawise User"}</strong><span>{currentUser?.role === "admin" ? "Administrator" : currentUser?.email}</span></div>
           <button aria-label="Profile options">•••</button>
         </div>
-        <button className="switch-role" onClick={() => { setRole(null); setSessionOpen(false); }}>⇄ Switch role</button>
+        <button className="switch-role" onClick={async() => { await fetch("/api/auth",{method:"DELETE"});setCurrentUser(null);setRole(null);setSessionOpen(false); }}>Sign out</button>
       </aside>
 
       <section className="workspace">
@@ -173,7 +178,7 @@ export default function VivaApp() {
       </section>
 
       <nav className="mobile-nav" aria-label="Mobile navigation">
-        {navItems.map((item) => (
+        {navItems.filter((item) => role === "admin" ? item.id === "admin" : item.id !== "admin").map((item) => (
           <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => { setView(item.id); setSessionOpen(false); }}>
             <span>{item.icon}</span>{item.label}
           </button>
@@ -183,8 +188,10 @@ export default function VivaApp() {
   );
 }
 
-function RoleChooser({ onChoose }: { onChoose: (role: "student" | "admin") => void }) {
-  return <main className="role-page"><div className="role-panel"><Brand /><span className="eyebrow">WELCOME TO VIVAWISE</span><h1>How would you like to continue?</h1><p>Choose your workspace. Administrator access is protected by a separate sign-in.</p><div className="role-grid"><button onClick={() => onChoose("student")}><span className="role-icon student-role">S</span><div><strong>Continue as Student</strong><small>View assigned topics and attend mock vivas</small></div><i>→</i></button><button onClick={() => onChoose("admin")}><span className="role-icon admin-role">A</span><div><strong>Continue as Administrator</strong><small>Create topics, upload documents and assign students</small></div><i>→</i></button></div><small className="role-note">Your choice controls the workspace view. Protected actions are always verified by the server.</small></div></main>;
+function AuthScreen({onAuthenticated}:{onAuthenticated:(user:{email:string;fullName:string;role:"student"|"admin"})=>void}){
+  const [mode,setMode]=useState<"login"|"signup">("login");const [email,setEmail]=useState("");const [password,setPassword]=useState("");const [fullName,setFullName]=useState("");const [error,setError]=useState("");const [busy,setBusy]=useState(false);
+  async function submit(e:React.FormEvent){e.preventDefault();setBusy(true);setError("");try{const r=await fetch("/api/auth",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:mode,email,password,fullName})});const d=await r.json();if(!r.ok)throw new Error(d.error);if(!d.ok){setError(d.message||"Please confirm your email.");return;}const s=await fetch("/api/auth");const session=await s.json();if(!s.ok)throw new Error(session.error||"Could not load profile");onAuthenticated(session.user);}catch(x){setError(x instanceof Error?x.message:"Authentication failed");}finally{setBusy(false);}}
+  return <main className="role-page"><form className="role-panel auth-panel" onSubmit={submit}><Brand/><span className="eyebrow">{mode==="login"?"WELCOME BACK":"CREATE YOUR ACCOUNT"}</span><h1>{mode==="login"?"Sign in to Vivawise":"Join Vivawise"}</h1><p>The first account registered becomes the administrator. Later accounts are students.</p>{mode==="signup"&&<label>Full name<input value={fullName} required onChange={e=>setFullName(e.target.value)}/></label>}<label>Email address<input type="email" value={email} required onChange={e=>setEmail(e.target.value)}/></label><label>Password<input type="password" minLength={8} value={password} required onChange={e=>setPassword(e.target.value)}/></label>{error&&<div className="settings-error">{error}</div>}<button className="primary-button" disabled={busy}>{busy?"Please wait…":mode==="login"?"Sign in":"Create account"}</button><button type="button" className="auth-switch" onClick={()=>{setMode(mode==="login"?"signup":"login");setError("");}}>{mode==="login"?"New to Vivawise? Create an account":"Already registered? Sign in"}</button></form></main>;
 }
 
 function Brand() {
@@ -341,17 +348,15 @@ function Metric({ value, label, change }: { value: string; label: string; change
 
 type AdminTopic = AssignedTopic & { document_count?: number; assignment_count?: number };
 function AdminPanel() {
-  const [authenticated, setAuthenticated] = useState(false); const [topics, setTopics] = useState<AdminTopic[]>([]); const [message, setMessage] = useState("");
-  const [username, setUsername] = useState("admin"); const [password, setPassword] = useState("");
+  const [authenticated, setAuthenticated] = useState(true); const [topics, setTopics] = useState<AdminTopic[]>([]); const [message, setMessage] = useState("");
   const [title, setTitle] = useState(""); const [subject, setSubject] = useState(""); const [description, setDescription] = useState(""); const [difficulty, setDifficulty] = useState<Difficulty>("Standard");
   const [selected, setSelected] = useState(""); const [studentEmail, setStudentEmail] = useState("");
   const load = () => fetch("/api/admin/topics").then(async (r) => { if (!r.ok) throw new Error(); return r.json(); }).then((d) => { setAuthenticated(true); setTopics(d.topics ?? []); setSelected((v) => v || d.topics?.[0]?.id || ""); }).catch(() => setAuthenticated(false));
   useEffect(load, []);
-  async function login(event: React.FormEvent) { event.preventDefault(); const r = await fetch("/api/admin/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) }); const d = await r.json(); if (!r.ok) return setMessage(d.error); setMessage(""); load(); }
   async function create(event: React.FormEvent) { event.preventDefault(); const r = await fetch("/api/admin/topics", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "create", title, subject, description, difficulty }) }); const d = await r.json(); if (!r.ok) return setMessage(d.error); setTitle(""); setSubject(""); setDescription(""); setMessage("Mock viva created."); load(); }
   async function assign(event: React.FormEvent) { event.preventDefault(); const r = await fetch("/api/admin/topics", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "assign", topicId: selected, email: studentEmail }) }); const d = await r.json(); if (!r.ok) return setMessage(d.error); setStudentEmail(""); setMessage("Student assigned successfully."); load(); }
   async function upload(event: ChangeEvent<HTMLInputElement>) { const file = event.target.files?.[0]; if (!file || !selected) return; setMessage("Indexing document…"); const form = new FormData(); form.set("topicId", selected); form.set("file", file); const r = await fetch("/api/admin/topics", { method: "POST", body: form }); const d = await r.json(); setMessage(r.ok ? "Document uploaded and indexed." : d.error); if (r.ok) load(); event.target.value = ""; }
-  if (!authenticated) return <div className="page narrow-page"><div className="page-heading"><div><span className="eyebrow">PROTECTED ADMINISTRATION</span><h1>Admin sign in</h1><p>Manage mock viva topics, documents and student access.</p></div></div><form className="admin-login" onSubmit={login}><label>Username<input value={username} onChange={(e) => setUsername(e.target.value)} /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>{message && <div className="settings-error">{message}</div>}<button className="primary-button">Sign in</button></form></div>;
+  if (!authenticated) return <div className="page narrow-page"><div className="settings-error">Your Supabase account does not have administrator access.</div></div>;
   return <div className="page"><div className="page-heading"><div><span className="eyebrow">ADMIN CONTROL CENTRE</span><h1>Mock viva assignments</h1><p>Create a topic, attach its source material, then grant access by student email.</p></div></div>{message && <div className="admin-message">{message}</div>}<div className="admin-grid"><form className="admin-card" onSubmit={create}><h2>Create mock viva</h2><label>Title<input value={title} required onChange={(e) => setTitle(e.target.value)} placeholder="DBMS Semester Viva" /></label><label>Subject<input value={subject} required onChange={(e) => setSubject(e.target.value)} placeholder="Database Systems" /></label><label>Description<textarea value={description} onChange={(e) => setDescription(e.target.value)} /></label><label>Difficulty<select value={difficulty} onChange={(e) => setDifficulty(e.target.value as Difficulty)}><option>Foundation</option><option>Standard</option><option>Challenge</option></select></label><button className="primary-button">Create topic</button></form><section className="admin-card"><h2>Assign & upload</h2><label>Mock viva<select value={selected} onChange={(e) => setSelected(e.target.value)}><option value="">Choose topic</option>{topics.map((t) => <option value={t.id} key={t.id}>{t.title}</option>)}</select></label><form onSubmit={assign}><label>Student email<input type="email" value={studentEmail} required onChange={(e) => setStudentEmail(e.target.value)} placeholder="student@example.com" /></label><button className="primary-button" disabled={!selected}>Assign student</button></form><label className="admin-upload">Topic document<input type="file" accept=".pdf,.doc,.docx,.txt" onChange={upload} disabled={!selected} /></label></section></div><section className="admin-topic-list"><h2>Topics</h2>{topics.length ? topics.map((t) => <button key={t.id} onClick={() => setSelected(t.id)}><div><strong>{t.title}</strong><span>{t.subject} · {t.difficulty}</span></div><span>{t.document_count ?? 0} docs · {t.assignment_count ?? 0} students</span></button>) : <p>No mock vivas created yet.</p>}</section></div>;
 }
 

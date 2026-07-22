@@ -1,57 +1,17 @@
-import { requireAdmin } from "../../../../lib/admin-auth";
-import { userIdFromEmail } from "../../../../lib/identity";
 import { attachFile, createTopicVectorStore, uploadKnowledgeFile } from "../../../../lib/openai";
-import { ensureSchema, requireBucket, requireDatabase } from "../../../../lib/runtime";
+import { requireSupabaseAdmin, supabaseAdmin } from "../../../../lib/supabase";
 
-export async function GET(request: Request) {
-  try {
-    await requireAdmin(request); await ensureSchema();
-    const result = await requireDatabase().prepare(`SELECT t.*, COUNT(DISTINCT d.id) document_count, COUNT(DISTINCT a.id) assignment_count
-      FROM mock_viva_topics t LEFT JOIN topic_documents d ON d.topic_id=t.id LEFT JOIN topic_assignments a ON a.topic_id=t.id
-      GROUP BY t.id ORDER BY t.created_at DESC`).all();
-    return Response.json({ topics: result.results });
-  } catch (error) { return failure(error); }
-}
-
-export async function POST(request: Request) {
-  try {
-    await requireAdmin(request); await ensureSchema();
-    const db = requireDatabase();
-    if (request.headers.get("content-type")?.includes("multipart/form-data")) {
-      const form = await request.formData(); const topicId = String(form.get("topicId") || ""); const file = form.get("file");
-      if (!topicId || !(file instanceof File)) return Response.json({ error: "Topic and document are required." }, { status: 400 });
-      const topic = await db.prepare("SELECT title, vector_store_id vectorStoreId FROM mock_viva_topics WHERE id=?").bind(topicId).first<{ title: string; vectorStoreId?: string }>();
-      if (!topic) return Response.json({ error: "Topic not found." }, { status: 404 });
-      let vectorStoreId = topic.vectorStoreId;
-      if (!vectorStoreId) { vectorStoreId = await createTopicVectorStore(topicId, topic.title); await db.prepare("UPDATE mock_viva_topics SET vector_store_id=?, updated_at=? WHERE id=?").bind(vectorStoreId, Date.now(), topicId).run(); }
-      const id = crypto.randomUUID(); const r2Key = `topics/${topicId}/${id}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-      await requireBucket().put(r2Key, await file.arrayBuffer(), { httpMetadata: { contentType: file.type }, customMetadata: { topicId, originalName: file.name } });
-      const openaiFileId = await uploadKnowledgeFile(file); await attachFile(vectorStoreId, openaiFileId);
-      await db.prepare("INSERT INTO topic_documents (id,topic_id,file_name,mime_type,size_bytes,r2_key,openai_file_id,status,created_at) VALUES (?,?,?,?,?,?,?,'ready',?)")
-        .bind(id, topicId, file.name, file.type || "application/octet-stream", file.size, r2Key, openaiFileId, Date.now()).run();
-      return Response.json({ ok: true });
-    }
-    const body = await request.json() as { action?: string; title?: string; subject?: string; description?: string; difficulty?: string; topicId?: string; email?: string };
-    if (body.action === "create") {
-      if (!body.title?.trim() || !body.subject?.trim()) return Response.json({ error: "Title and subject are required." }, { status: 400 });
-      const id = crypto.randomUUID(); const now = Date.now();
-      await db.prepare("INSERT INTO mock_viva_topics (id,title,subject,description,difficulty,created_at,updated_at) VALUES (?,?,?,?,?,?,?)")
-        .bind(id, body.title.trim(), body.subject.trim(), body.description?.trim() || "", body.difficulty || "Standard", now, now).run();
-      return Response.json({ id });
-    }
-    if (body.action === "assign") {
-      const email = body.email?.trim().toLowerCase(); if (!body.topicId || !email || !email.includes("@")) return Response.json({ error: "A valid student email is required." }, { status: 400 });
-      const userId = await userIdFromEmail(email);
-      await db.prepare("INSERT OR REPLACE INTO topic_assignments (id,topic_id,user_id,assigned_email,assigned_at) VALUES (?,?,?,?,?)")
-        .bind(crypto.randomUUID(), body.topicId, userId, email, Date.now()).run();
-      return Response.json({ ok: true });
-    }
-    return Response.json({ error: "Unknown action." }, { status: 400 });
-  } catch (error) { return failure(error); }
-}
-
-function failure(error: unknown) {
-  if (error instanceof Response) return error;
-  const message = error instanceof Error ? error.message : "Unexpected server error";
-  return Response.json({ error: message }, { status: message.includes("OPENAI_API_KEY") ? 503 : 500 });
-}
+export async function GET(request:Request){try{await requireSupabaseAdmin(request);const sb=supabaseAdmin();const {data,error}=await sb.from("tests").select("*,test_documents(count),test_assignments(count)").order("created_at",{ascending:false});if(error)throw error;return Response.json({topics:(data||[]).map(t=>({...t,document_count:t.test_documents?.[0]?.count||0,assignment_count:t.test_assignments?.[0]?.count||0}))});}catch(e){return fail(e);}}
+export async function POST(request:Request){try{const user=await requireSupabaseAdmin(request);const sb=supabaseAdmin();
+  if(request.headers.get("content-type")?.includes("multipart/form-data")){const form=await request.formData();const testId=String(form.get("topicId")||"");const file=form.get("file");if(!testId||!(file instanceof File))return Response.json({error:"Test and document are required."},{status:400});
+    const {data:test,error:testError}=await sb.from("tests").select("id,name,openai_vector_store_id").eq("id",testId).single();if(testError||!test)return Response.json({error:"Test not found."},{status:404});
+    const id=crypto.randomUUID();const path=`${testId}/${id}-${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;const bytes=await file.arrayBuffer();const {error:storageError}=await sb.storage.from("test-documents").upload(path,bytes,{contentType:file.type,upsert:false});if(storageError)throw storageError;
+    let vectorId=test.openai_vector_store_id as string|null;let openaiFileId:string|null=null;let status="pending",errorMessage:string|null=null;
+    try{if(!vectorId){vectorId=await createTopicVectorStore(testId,test.name);await sb.from("tests").update({openai_vector_store_id:vectorId,updated_at:new Date().toISOString()}).eq("id",testId);}openaiFileId=await uploadKnowledgeFile(file);await attachFile(vectorId,openaiFileId);status="ready";}catch(error){errorMessage=error instanceof Error?error.message:"OpenAI indexing pending";}
+    const {error}=await sb.from("test_documents").insert({id,test_id:testId,file_name:file.name,storage_path:path,mime_type:file.type||"application/octet-stream",size_bytes:file.size,openai_file_id:openaiFileId,status,error_message:errorMessage,uploaded_by:user.id});if(error)throw error;return Response.json({ok:true,status});}
+  const body=await request.json() as {action?:string;title?:string;subject?:string;description?:string;difficulty?:string;topicId?:string;email?:string};
+  if(body.action==="create"){const {data,error}=await sb.from("tests").insert({name:body.title?.trim(),subject:body.subject?.trim(),description:body.description?.trim()||"",difficulty:body.difficulty||"Standard",created_by:user.id}).select("id").single();if(error)throw error;return Response.json({id:data.id});}
+  if(body.action==="assign"){const email=body.email?.trim().toLowerCase();const {data:student,error:studentError}=await sb.from("profiles").select("id").eq("email",email).eq("role","student").single();if(studentError||!student)return Response.json({error:"No registered student was found with that email."},{status:404});const {error}=await sb.from("test_assignments").upsert({test_id:body.topicId,user_id:student.id,assigned_by:user.id},{onConflict:"test_id,user_id"});if(error)throw error;return Response.json({ok:true});}
+  return Response.json({error:"Unknown action."},{status:400});
+}catch(e){return fail(e);}}
+function fail(error:unknown){if(error instanceof Response)return error;return Response.json({error:error instanceof Error?error.message:"Unexpected error"},{status:500});}

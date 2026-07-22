@@ -1,12 +1,2 @@
-import { requireVivaUser } from "../../../lib/identity";
-import { ensureSchema, requireDatabase } from "../../../lib/runtime";
-
-export async function GET(request: Request) {
-  try {
-    const user = await requireVivaUser(request); await ensureSchema();
-    const rows = await requireDatabase().prepare(`SELECT t.id,t.title,t.subject,t.description,t.difficulty,COUNT(d.id) documentCount
-      FROM topic_assignments a JOIN mock_viva_topics t ON t.id=a.topic_id LEFT JOIN topic_documents d ON d.topic_id=t.id
-      WHERE a.user_id=? GROUP BY t.id ORDER BY a.assigned_at DESC`).bind(user.userId).all();
-    return Response.json({ user: { email: user.email, displayName: user.displayName }, topics: rows.results });
-  } catch (error) { if (error instanceof Response) return error; return Response.json({ error: error instanceof Error ? error.message : "Unexpected error" }, { status: 500 }); }
-}
+import { requireAppUser, supabaseAdmin } from "../../../lib/supabase";
+export async function GET(request:Request){try{const user=await requireAppUser(request);const {data,error}=await supabaseAdmin().from("test_assignments").select("tests(id,name,subject,description,difficulty,test_documents(count))").eq("user_id",user.id).order("assigned_at",{ascending:false});if(error)throw error;const topics=(data||[]).map((row:any)=>row.tests).filter(Boolean).map((t:any)=>({id:t.id,title:t.name,subject:t.subject,description:t.description,difficulty:t.difficulty,documentCount:t.test_documents?.[0]?.count||0}));return Response.json({user:{email:user.email,displayName:user.fullName},topics});}catch(e){if(e instanceof Response)return e;return Response.json({error:e instanceof Error?e.message:"Unexpected error"},{status:500});}}

@@ -41,6 +41,14 @@ Open **Admin** and sign in with `admin` / `Vivawise@2026`. The admin can create 
 
 These credentials are temporary and hard-coded server-side for prototype testing. Replace them with Supabase authentication and role-based authorization before public use.
 
+## Supabase database setup
+
+1. Open the Supabase SQL Editor for the Vivawise project.
+2. Copy and run `supabase/migrations/20260722_vivawise.sql` once.
+3. Start Vivawise and create the first account. The database trigger makes the first registered account the administrator; later accounts are students.
+
+The schema contains users/profiles, named tests, test documents, assignments, attempts and answers. Row Level Security restricts students to their own assignments and attempts. Supporting files are stored in the private `test-documents` bucket under their test ID.
+
 ## Environment
 
 - `OPENAI_API_KEY` — required; keep this secret
