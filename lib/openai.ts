@@ -91,6 +91,7 @@ export async function createVivaResponse(
   schema: Record<string, unknown>,
   vectorStoreId?: string | null,
   maxFileResults = 6,
+  maxOutputTokens = 1800,
 ) {
   const { model } = configuration();
   const result = await openAI("/responses", {
@@ -114,7 +115,7 @@ export async function createVivaResponse(
         verbosity: "low",
         format: { type: "json_schema", name: schemaName, strict: true, schema },
       },
-      max_output_tokens: 1800,
+      max_output_tokens: maxOutputTokens,
       store: false,
     }),
   });

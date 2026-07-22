@@ -252,6 +252,12 @@ export default function VivaApp() {
       return;
     }
     setSelectedTopic(chosen);
+    if (chosen.documentCount > 0 && !chosen.syllabusModules?.length) {
+      setSelectedSyllabusModule("");
+      setSessionOpen(false);
+      setView("practice");
+      return;
+    }
     const moduleIsValid = chosen.syllabusModules?.some(
       (module) => module.title === selectedSyllabusModule,
     );
@@ -1026,7 +1032,10 @@ function PracticeSetup({
             disabled={
               !selected ||
               scanning ||
-              Boolean(selected.syllabusModules?.length && !selectedModule)
+              Boolean(
+                selected.documentCount > 0 &&
+                  (!selected.syllabusModules?.length || !selectedModule),
+              )
             }
             onClick={onStart}
           >

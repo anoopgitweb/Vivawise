@@ -198,11 +198,12 @@ export async function POST(request: Request) {
           { status: 409 },
         );
       const extracted = await createVivaResponse(
-        `Analyze all documents attached to the '${test.name}' viva. Identify the actual examinable syllabus units, chapters, modules, or major topic groups. Merge duplicates across documents. Return a concise, logically ordered categorization. Do not invent content that is not supported by the documents.`,
+        `Analyze all documents attached to the '${test.name}' viva. Identify the actual examinable syllabus units, chapters, modules, or major topic groups. Merge duplicates across documents. Return a concise, logically ordered categorization with no more than 30 modules total. Keep every description under 25 words. Do not invent content that is not supported by the documents.`,
         "syllabus_modules",
         syllabusModuleSchema,
         test.openai_vector_store_id,
         20,
+        6000,
       );
       const categories = Array.isArray(extracted.categories)
         ? extracted.categories
