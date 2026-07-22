@@ -170,12 +170,23 @@ export async function POST(request: Request) {
     if (body.action === "modules") {
       if (!body.topicId)
         return Response.json({ error: "Choose an assigned viva." }, { status: 400 });
-      const { data: assignment } = await sb
+      let { data: assignment, error: assignmentError } = await sb
         .from("test_assignments")
         .select("tests(id,name,openai_vector_store_id,syllabus_modules)")
         .eq("test_id", body.topicId)
         .eq("user_id", user.userId)
         .single();
+      if (assignmentError && assignmentError.message.includes("syllabus_modules")) {
+        const fallback = await sb
+          .from("test_assignments")
+          .select("tests(id,name,openai_vector_store_id)")
+          .eq("test_id", body.topicId)
+          .eq("user_id", user.userId)
+          .single();
+        assignment = fallback.data as typeof assignment;
+        assignmentError = fallback.error;
+      }
+      if (assignmentError) throw assignmentError;
       const test = (assignment as any)?.tests as any;
       if (!test)
         return Response.json({ error: "This viva is not assigned to you." }, { status: 403 });
@@ -191,6 +202,7 @@ export async function POST(request: Request) {
         "syllabus_modules",
         syllabusModuleSchema,
         test.openai_vector_store_id,
+        20,
       );
       const categories = Array.isArray(extracted.categories)
         ? extracted.categories
@@ -211,8 +223,11 @@ export async function POST(request: Request) {
         .from("tests")
         .update({ syllabus_modules: modules, updated_at: new Date().toISOString() })
         .eq("id", test.id);
-      if (error) throw error;
-      return Response.json({ modules, cached: false });
+      const cacheUnavailable = Boolean(
+        error && error.message.includes("syllabus_modules"),
+      );
+      if (error && !cacheUnavailable) throw error;
+      return Response.json({ modules, cached: false, cacheUnavailable });
     }
 
     if (body.action === "start") {
@@ -307,7 +322,7 @@ export async function POST(request: Request) {
         })
         .select("id")
         .single();
-      if (error && error.message.includes("selected_module") && !selectedModule) {
+      if (error && error.message.includes("selected_module")) {
         const fallback = await sb
           .from("test_attempts")
           .insert({ test_id: topic.id, user_id: user.userId })
@@ -425,7 +440,9 @@ export async function POST(request: Request) {
           ...attemptResult,
         });
       }
-      const selectedModule = String((owned as any).selected_module || "");
+      const selectedModule = String(
+        (owned as any).selected_module || body.syllabusModule || "",
+      );
       const prompt = `You are Vivawise, a fair university viva examiner. ${selectedModule ? `This entire attempt is restricted to the student-selected syllabus module '${selectedModule}'.` : ""} ${test.instructions ? `Examiner instructions: ${test.instructions}` : ""} ${vectorStoreId ? "You MUST use file search and evaluate only against the attached test documents. Do not introduce outside facts." : "Evaluate using foundational knowledge."} Question: ${body.question}. Student answer: ${body.answer}. Score 0 to 10. Then generate question ${(answerCount || 0) + 2} of ${totalQuestions}, also grounded only in the attached documents, restricted to the selected syllabus module, and following the examiner instructions.`;
       const demoMode = !getVivaEnv().OPENAI_API_KEY;
       const result = demoMode

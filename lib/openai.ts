@@ -90,6 +90,7 @@ export async function createVivaResponse(
   schemaName: string,
   schema: Record<string, unknown>,
   vectorStoreId?: string | null,
+  maxFileResults = 6,
 ) {
   const { model } = configuration();
   const result = await openAI("/responses", {
@@ -104,7 +105,7 @@ export async function createVivaResponse(
             {
               type: "file_search",
               vector_store_ids: [vectorStoreId],
-              max_num_results: 6,
+              max_num_results: maxFileResults,
             },
           ]
         : undefined,

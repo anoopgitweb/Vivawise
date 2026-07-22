@@ -858,6 +858,7 @@ function PracticeSetup({
 }) {
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState("");
+  const [scanRequest, setScanRequest] = useState(0);
 
   useEffect(() => {
     if (!selected || selected.syllabusModules?.length || !selected.documentCount)
@@ -891,7 +892,7 @@ function PracticeSetup({
     return () => {
       active = false;
     };
-  }, [selected?.id, selected?.documentCount]);
+  }, [selected?.id, selected?.documentCount, scanRequest]);
 
   return (
     <div className="page narrow-page">
@@ -962,7 +963,16 @@ function PracticeSetup({
             {scanning ? (
               <p className="module-scan-status">Scanning and categorizing the attached documents…</p>
             ) : scanError ? (
-              <div className="settings-error">{scanError}</div>
+              <div className="settings-error">
+                <strong>Could not categorize the syllabus.</strong>
+                <span>{scanError}</span>
+                <button
+                  className="primary-button"
+                  onClick={() => setScanRequest((value) => value + 1)}
+                >
+                  Scan documents again
+                </button>
+              </div>
             ) : selected.syllabusModules?.length ? (
               <label>
                 Syllabus module
@@ -1121,6 +1131,7 @@ function VivaSession(props: {
           answer: skipped ? "Question skipped by student." : props.answer,
           questionNumber: props.question,
           skipped,
+          syllabusModule: props.syllabusModule,
         }),
       });
       const data = await response.json();
