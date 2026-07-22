@@ -5,6 +5,9 @@ color 0B
 
 cd /d "%~dp0"
 
+set "CODEX_NODE_DIR=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin"
+set "CODEX_PNPM=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\fallback\pnpm.cmd"
+
 echo.
 echo  =====================================================
 echo                  VIVAWISE LOCAL APP
@@ -13,13 +16,19 @@ echo.
 
 where node >nul 2>&1
 if errorlevel 1 (
-    echo  Node.js was not found on this computer.
-    echo.
-    echo  Please install Node.js 22 or newer from:
-    echo  https://nodejs.org/
-    echo.
-    pause
-    exit /b 1
+    if exist "%CODEX_NODE_DIR%\node.exe" (
+        set "PATH=%CODEX_NODE_DIR%;%PATH%"
+        echo  Using the Node.js runtime included with Codex.
+        echo.
+    ) else (
+        echo  Node.js was not found on this computer.
+        echo.
+        echo  Please install Node.js 22 or newer from:
+        echo  https://nodejs.org/
+        echo.
+        pause
+        exit /b 1
+    )
 )
 
 for /f "tokens=1 delims=." %%V in ('node -p "process.versions.node"') do set "NODE_MAJOR=%%V"
@@ -39,11 +48,15 @@ if not exist "node_modules\.bin\vinext.cmd" (
     echo  This may take a few minutes.
     echo.
 
-    where corepack >nul 2>&1
-    if errorlevel 1 (
-        call npm install
+    if exist "%CODEX_PNPM%" (
+        call "%CODEX_PNPM%" install
     ) else (
-        call corepack pnpm install
+        where corepack >nul 2>&1
+        if errorlevel 1 (
+            call npm install
+        ) else (
+            call corepack pnpm install
+        )
     )
 
     if errorlevel 1 (
@@ -67,11 +80,15 @@ echo.
 
 start "" powershell.exe -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 4; Start-Process 'http://localhost:3000'"
 
-where corepack >nul 2>&1
-if errorlevel 1 (
-    call npx vinext dev
+if exist "%CODEX_PNPM%" (
+    call "%CODEX_PNPM%" exec vinext dev
 ) else (
-    call corepack pnpm exec vinext dev
+    where corepack >nul 2>&1
+    if errorlevel 1 (
+        call npx vinext dev
+    ) else (
+        call corepack pnpm exec vinext dev
+    )
 )
 
 echo.
