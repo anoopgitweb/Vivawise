@@ -1427,6 +1427,7 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
     startedAt: number;
   } | null>(null);
   const [indexingElapsed, setIndexingElapsed] = useState(0);
+  const [uploadError, setUploadError] = useState("");
   const [selected, setSelected] = useState("");
   const [selectedUser, setSelectedUser] = useState("");
   const [savedInstructions, setSavedInstructions] = useState("");
@@ -1560,6 +1561,7 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
       event.target.value = "";
       return;
     }
+    setUploadError("");
     setMessage("Indexing document…");
     setIndexing({ fileName: file.name, startedAt: Date.now() });
     const form = new FormData();
@@ -1570,13 +1572,36 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
         method: "POST",
         body: form,
       });
-      const d = await r.json();
-      setMessage(r.ok ? "Document uploaded and indexed." : d.error);
-      if (r.ok) await load();
+      const responseText = await r.text();
+      let d: { error?: string; status?: string } = {};
+      try {
+        d = responseText ? JSON.parse(responseText) : {};
+      } catch {
+        d = { error: responseText };
+      }
+      if (!r.ok) {
+        const detail =
+          r.status === 401
+            ? "Your administrator session expired. Sign out, sign in again, and retry the upload."
+            : d.error || `Upload failed with status ${r.status}.`;
+        setUploadError(detail);
+        setMessage(detail);
+      } else if (d.status === "failed") {
+        const detail =
+          d.error ||
+          "The file was saved, but OpenAI indexing failed. Use Retry.";
+        setUploadError(detail);
+        setMessage(detail);
+        await load();
+      } else {
+        setMessage("Document uploaded and indexed.");
+        await load();
+      }
     } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "Document upload failed.",
-      );
+      const detail =
+        error instanceof Error ? error.message : "Document upload failed.";
+      setUploadError(detail);
+      setMessage(detail);
     } finally {
       setIndexing(null);
       event.target.value = "";
@@ -1994,6 +2019,12 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
                     disabled={!selected}
                   />
                 </label>
+                {uploadError && (
+                  <div className="settings-error document-upload-error">
+                    <strong>Document was not attached</strong>
+                    <span>{uploadError}</span>
+                  </div>
+                )}
                 <div className="module-documents">
                   <strong>Attached documents</strong>
                   {topics.find((topic) => topic.id === selected)?.documents

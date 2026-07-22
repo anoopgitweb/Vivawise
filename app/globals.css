@@ -2377,6 +2377,14 @@ button {
   background: var(--teal);
   animation: indexing-slide 1.4s ease-in-out infinite;
 }
+.document-upload-error {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+.document-upload-error span {
+  overflow-wrap: anywhere;
+}
 @keyframes indexing-slide {
   from {
     transform: translateX(-110%);

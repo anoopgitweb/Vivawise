@@ -149,7 +149,7 @@ export async function POST(request: Request) {
         .eq("id", id);
       if (error)
         throw new Error(`Document status update failed: ${error.message}`);
-      return Response.json({ ok: true, status });
+      return Response.json({ ok: true, status, error: errorMessage });
     }
     const body = (await request.json()) as {
       action?: string;
