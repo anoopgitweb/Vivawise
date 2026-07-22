@@ -63,6 +63,7 @@ export async function createVivaResponse(input: string, schemaName: string, sche
       reasoning: { effort: "low" },
       input,
       tools: vectorStoreId ? [{ type: "file_search", vector_store_ids: [vectorStoreId], max_num_results: 6 }] : undefined,
+      tool_choice: vectorStoreId ? { type: "file_search" } : undefined,
       text: { verbosity: "low", format: { type: "json_schema", name: schemaName, strict: true, schema } },
       max_output_tokens: 1800,
       store: false,
