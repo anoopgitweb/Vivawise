@@ -173,7 +173,109 @@ export async function POST(request: Request) {
       instructions?: string;
       groundingMode?: string;
       documentId?: string;
+      fileName?: string;
+      mimeType?: string;
+      sizeBytes?: number;
     };
+    if (body.action === "create_document_upload") {
+      if (!body.topicId || !body.fileName)
+        return Response.json(
+          { error: "Viva and filename are required." },
+          { status: 400 },
+        );
+      const id = crypto.randomUUID();
+      const path = `${body.topicId}/${id}-${body.fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const { error: recordError } = await sb.from("test_documents").insert({
+        id,
+        test_id: body.topicId,
+        file_name: body.fileName,
+        storage_path: path,
+        mime_type: body.mimeType || "application/octet-stream",
+        size_bytes: body.sizeBytes || 0,
+        status: "processing",
+        uploaded_by: user.id,
+      });
+      if (recordError)
+        throw new Error(
+          `Document database record failed: ${recordError.message}`,
+        );
+      const { data: signed, error: signedError } = await sb.storage
+        .from("test-documents")
+        .createSignedUploadUrl(path);
+      if (signedError || !signed?.signedUrl) {
+        await sb.from("test_documents").delete().eq("id", id);
+        throw new Error(
+          `Could not prepare upload: ${signedError?.message || "No signed URL returned"}`,
+        );
+      }
+      return Response.json({ documentId: id, signedUrl: signed.signedUrl });
+    }
+    if (body.action === "finalize_document_upload") {
+      if (!body.documentId)
+        return Response.json(
+          { error: "Document is required." },
+          { status: 400 },
+        );
+      const { data: document, error: documentError } = await sb
+        .from("test_documents")
+        .select("id,test_id,file_name,storage_path,mime_type")
+        .eq("id", body.documentId)
+        .single();
+      if (documentError || !document)
+        return Response.json(
+          { error: "Document record not found." },
+          { status: 404 },
+        );
+      const { data: test, error: testError } = await sb
+        .from("tests")
+        .select("id,name,openai_vector_store_id")
+        .eq("id", document.test_id)
+        .single();
+      if (testError || !test)
+        throw new Error(testError?.message || "Viva not found.");
+      try {
+        const { data: blob, error: downloadError } = await sb.storage
+          .from("test-documents")
+          .download(document.storage_path);
+        if (downloadError || !blob)
+          throw new Error(
+            downloadError?.message || "Uploaded file could not be read.",
+          );
+        let vectorId = test.openai_vector_store_id as string | null;
+        if (!vectorId) {
+          vectorId = await createTopicVectorStore(test.id, test.name);
+          await sb
+            .from("tests")
+            .update({ openai_vector_store_id: vectorId })
+            .eq("id", test.id);
+        }
+        const openaiFileId = await uploadKnowledgeFile(
+          new File([blob], document.file_name, { type: document.mime_type }),
+        );
+        await attachFile(vectorId, openaiFileId);
+        const { error: updateError } = await sb
+          .from("test_documents")
+          .update({
+            status: "ready",
+            error_message: null,
+            openai_file_id: openaiFileId,
+          })
+          .eq("id", document.id);
+        if (updateError) throw new Error(updateError.message);
+        return Response.json({ ok: true, status: "ready" });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Indexing failed.";
+        await sb
+          .from("test_documents")
+          .update({ status: "failed", error_message: message })
+          .eq("id", document.id);
+        return Response.json(
+          { error: message, status: "failed" },
+          { status: 502 },
+        );
+      }
+    }
     if (body.action === "create") {
       const { data, error } = await sb
         .from("tests")

@@ -1472,6 +1472,46 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
     const timer = window.setInterval(update, 1000);
     return () => window.clearInterval(timer);
   }, [indexing]);
+  async function uploadDocumentToViva(topicId: string, file: File) {
+    const prepare = await fetch("/api/admin/topics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "create_document_upload",
+        topicId,
+        fileName: file.name,
+        mimeType: file.type,
+        sizeBytes: file.size,
+      }),
+    });
+    const prepared = await prepare.json();
+    if (!prepare.ok)
+      throw new Error(prepared.error || "Could not prepare upload.");
+    const directForm = new FormData();
+    directForm.set("cacheControl", "3600");
+    directForm.set("", file, file.name);
+    const storageUpload = await fetch(prepared.signedUrl, {
+      method: "PUT",
+      headers: { "x-upsert": "false" },
+      body: directForm,
+    });
+    if (!storageUpload.ok)
+      throw new Error(
+        `Supabase Storage rejected the file (${storageUpload.status}).`,
+      );
+    const finalize = await fetch("/api/admin/topics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "finalize_document_upload",
+        documentId: prepared.documentId,
+      }),
+    });
+    const result = await finalize.json();
+    if (!finalize.ok)
+      throw new Error(result.error || "OpenAI indexing failed.");
+    return result as { status: string };
+  }
   async function create(event: React.FormEvent) {
     event.preventDefault();
     setCreating(true);
@@ -1511,16 +1551,13 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
     for (const file of createFiles) {
       setMessage(`Uploading ${file.name}…`);
       setIndexing({ fileName: file.name, startedAt: Date.now() });
-      const form = new FormData();
-      form.set("topicId", d.id);
-      form.set("file", file);
-      const uploadResponse = await fetch("/api/admin/topics", {
-        method: "POST",
-        body: form,
-      });
-      const uploadData = await uploadResponse.json();
-      if (uploadResponse.ok && uploadData.status === "ready") ready += 1;
-      else pending += 1;
+      try {
+        const uploadData = await uploadDocumentToViva(d.id, file);
+        if (uploadData.status === "ready") ready += 1;
+        else pending += 1;
+      } catch {
+        pending += 1;
+      }
     }
     setIndexing(null);
     setTitle("");
@@ -1564,39 +1601,10 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
     setUploadError("");
     setMessage("Indexing document…");
     setIndexing({ fileName: file.name, startedAt: Date.now() });
-    const form = new FormData();
-    form.set("topicId", selected);
-    form.set("file", file);
     try {
-      const r = await fetch("/api/admin/topics", {
-        method: "POST",
-        body: form,
-      });
-      const responseText = await r.text();
-      let d: { error?: string; status?: string } = {};
-      try {
-        d = responseText ? JSON.parse(responseText) : {};
-      } catch {
-        d = { error: responseText };
-      }
-      if (!r.ok) {
-        const detail =
-          r.status === 401
-            ? "Your administrator session expired. Sign out, sign in again, and retry the upload."
-            : d.error || `Upload failed with status ${r.status}.`;
-        setUploadError(detail);
-        setMessage(detail);
-      } else if (d.status === "failed") {
-        const detail =
-          d.error ||
-          "The file was saved, but OpenAI indexing failed. Use Retry.";
-        setUploadError(detail);
-        setMessage(detail);
-        await load();
-      } else {
-        setMessage("Document uploaded and indexed.");
-        await load();
-      }
+      await uploadDocumentToViva(selected, file);
+      setMessage("Document uploaded and indexed.");
+      await load();
     } catch (error) {
       const detail =
         error instanceof Error ? error.message : "Document upload failed.";
