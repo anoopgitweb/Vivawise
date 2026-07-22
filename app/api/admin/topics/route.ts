@@ -14,6 +14,7 @@ export async function GET(request: Request) {
       { data: assignments, error: assignmentError },
       { data: users, error: userError },
       { data: attempts, error: attemptError },
+      { data: documents, error: documentError },
     ] = await Promise.all([
       sb
         .from("tests")
@@ -32,11 +33,16 @@ export async function GET(request: Request) {
         .from("test_attempts")
         .select("id,test_id,user_id,status,score,started_at,completed_at")
         .order("started_at", { ascending: false }),
+      sb
+        .from("test_documents")
+        .select("id,test_id,file_name,status,created_at,error_message")
+        .order("created_at", { ascending: false }),
     ]);
     if (error) throw error;
     if (assignmentError) throw assignmentError;
     if (userError) throw userError;
     if (attemptError) throw attemptError;
+    if (documentError) throw documentError;
     const userMap = new Map((users || []).map((u) => [u.id, u]));
     return Response.json({
       topics: (data || []).map((t) => ({
@@ -50,6 +56,9 @@ export async function GET(request: Request) {
         attempts: (attempts || [])
           .filter((a) => a.test_id === t.id)
           .map((a) => ({ ...a, user: userMap.get(a.user_id) })),
+        documents: (documents || []).filter(
+          (document) => document.test_id === t.id,
+        ),
       })),
       users,
     });
@@ -217,6 +226,41 @@ export async function POST(request: Request) {
           updated_at: new Date().toISOString(),
         })
         .eq("id", body.topicId);
+      if (error) throw error;
+      return Response.json({ ok: true });
+    }
+    if (body.action === "update_module") {
+      if (!body.topicId)
+        return Response.json({ error: "Choose a module." }, { status: 400 });
+      const { error } = await sb
+        .from("tests")
+        .update({
+          name: body.title?.trim(),
+          subject: body.subject?.trim(),
+          description: body.description?.trim() || "",
+          difficulty: body.difficulty || "Standard",
+          question_count: body.questionCount || 10,
+          time_limit_minutes: body.timeLimitMinutes || 20,
+          attempts_allowed: body.attemptsAllowed || 1,
+          pass_mark: body.passMark ?? 60,
+          instructions: body.instructions?.trim() || "",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", body.topicId);
+      if (error) throw error;
+      return Response.json({ ok: true });
+    }
+    if (body.action === "unassign") {
+      if (!body.topicId || !body.userId)
+        return Response.json(
+          { error: "Module and student are required." },
+          { status: 400 },
+        );
+      const { error } = await sb
+        .from("test_assignments")
+        .delete()
+        .eq("test_id", body.topicId)
+        .eq("user_id", body.userId);
       if (error) throw error;
       return Response.json({ ok: true });
     }

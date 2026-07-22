@@ -1150,12 +1150,24 @@ type AdminAttempt = {
   completed_at?: string;
   user?: AdminUser;
 };
+type AdminDocument = {
+  id: string;
+  file_name: string;
+  status: string;
+  created_at: string;
+  error_message?: string;
+};
 type AdminTopic = AssignedTopic & {
   instructions?: string;
   document_count?: number;
   assignment_count?: number;
   assignments?: AdminAssignment[];
   attempts?: AdminAttempt[];
+  documents?: AdminDocument[];
+  question_count?: number;
+  time_limit_minutes?: number;
+  attempts_allowed?: number;
+  pass_mark?: number;
 };
 function AdminPanel() {
   const [authenticated, setAuthenticated] = useState(true);
@@ -1180,6 +1192,15 @@ function AdminPanel() {
   const [selected, setSelected] = useState("");
   const [selectedUser, setSelectedUser] = useState("");
   const [savedInstructions, setSavedInstructions] = useState("");
+  const [moduleTitle, setModuleTitle] = useState("");
+  const [moduleSubject, setModuleSubject] = useState("");
+  const [moduleDescription, setModuleDescription] = useState("");
+  const [moduleDifficulty, setModuleDifficulty] =
+    useState<Difficulty>("Standard");
+  const [moduleQuestions, setModuleQuestions] = useState(10);
+  const [moduleTime, setModuleTime] = useState(20);
+  const [moduleAttempts, setModuleAttempts] = useState(1);
+  const [modulePassMark, setModulePassMark] = useState(60);
   const load = () =>
     fetch("/api/admin/topics")
       .then(async (r) => {
@@ -1263,9 +1284,16 @@ function AdminPanel() {
     event.target.value = "";
   }
   useEffect(() => {
-    setSavedInstructions(
-      topics.find((topic) => topic.id === selected)?.instructions || "",
-    );
+    const module = topics.find((topic) => topic.id === selected);
+    setSavedInstructions(module?.instructions || "");
+    setModuleTitle(module?.title || "");
+    setModuleSubject(module?.subject || "");
+    setModuleDescription(module?.description || "");
+    setModuleDifficulty(module?.difficulty || "Standard");
+    setModuleQuestions(module?.question_count || 10);
+    setModuleTime(module?.time_limit_minutes || 20);
+    setModuleAttempts(module?.attempts_allowed || 1);
+    setModulePassMark(module?.pass_mark ?? 60);
   }, [selected, topics]);
   async function updateInstructions() {
     if (!selected) return;
@@ -1282,6 +1310,43 @@ function AdminPanel() {
     if (!response.ok)
       return setMessage(data.error || "Could not save instructions.");
     setMessage("Examiner instructions updated.");
+    load();
+  }
+  async function updateModule() {
+    if (!selected) return;
+    const response = await fetch("/api/admin/topics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "update_module",
+        topicId: selected,
+        title: moduleTitle,
+        subject: moduleSubject,
+        description: moduleDescription,
+        difficulty: moduleDifficulty,
+        questionCount: moduleQuestions,
+        timeLimitMinutes: moduleTime,
+        attemptsAllowed: moduleAttempts,
+        passMark: modulePassMark,
+        instructions: savedInstructions,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok)
+      return setMessage(data.error || "Could not update module.");
+    setMessage("Viva module updated successfully.");
+    load();
+  }
+  async function unassign(userId: string, topicId = selected) {
+    const response = await fetch("/api/admin/topics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "unassign", topicId, userId }),
+    });
+    const data = await response.json();
+    if (!response.ok)
+      return setMessage(data.error || "Could not remove student.");
+    setMessage("Student removed from the module.");
     load();
   }
   if (!authenticated)
@@ -1508,7 +1573,103 @@ function AdminPanel() {
               disabled={!selected}
             />
           </label>
+          <div className="module-documents">
+            <strong>Attached documents</strong>
+            {topics.find((topic) => topic.id === selected)?.documents
+              ?.length ? (
+              topics
+                .find((topic) => topic.id === selected)!
+                .documents!.map((document) => (
+                  <span key={document.id}>
+                    <b>{document.file_name}</b>
+                    <em className={document.status}>{document.status}</em>
+                  </span>
+                ))
+            ) : (
+              <small>No documents attached to this module.</small>
+            )}
+          </div>
           <div className="prompt-editor">
+            <h3>Edit selected viva module</h3>
+            <label>
+              Module name
+              <input
+                value={moduleTitle}
+                onChange={(e) => setModuleTitle(e.target.value)}
+                disabled={!selected}
+              />
+            </label>
+            <label>
+              Subject
+              <input
+                value={moduleSubject}
+                onChange={(e) => setModuleSubject(e.target.value)}
+                disabled={!selected}
+              />
+            </label>
+            <label>
+              Description
+              <textarea
+                value={moduleDescription}
+                onChange={(e) => setModuleDescription(e.target.value)}
+                disabled={!selected}
+              />
+            </label>
+            <div className="control-grid">
+              <label>
+                Difficulty
+                <select
+                  value={moduleDifficulty}
+                  onChange={(e) =>
+                    setModuleDifficulty(e.target.value as Difficulty)
+                  }
+                >
+                  <option>Foundation</option>
+                  <option>Standard</option>
+                  <option>Challenge</option>
+                </select>
+              </label>
+              <label>
+                Questions
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={moduleQuestions}
+                  onChange={(e) => setModuleQuestions(Number(e.target.value))}
+                />
+              </label>
+              <label>
+                Minutes
+                <input
+                  type="number"
+                  min="1"
+                  max="300"
+                  value={moduleTime}
+                  onChange={(e) => setModuleTime(Number(e.target.value))}
+                />
+              </label>
+              <label>
+                Attempts
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={moduleAttempts}
+                  onChange={(e) => setModuleAttempts(Number(e.target.value))}
+                />
+              </label>
+              <label>
+                Pass mark (%)
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={modulePassMark}
+                  onChange={(e) => setModulePassMark(Number(e.target.value))}
+                />
+              </label>
+            </div>
             <label>
               Examiner instructions / Prompt
               <textarea
@@ -1524,11 +1685,11 @@ function AdminPanel() {
             </small>
             <button
               type="button"
-              className="ghost-button"
+              className="primary-button"
               disabled={!selected}
-              onClick={updateInstructions}
+              onClick={updateModule}
             >
-              Save instructions
+              Save module changes
             </button>
           </div>
         </section>
@@ -1556,6 +1717,16 @@ function AdminPanel() {
                     <span key={a.id}>
                       <b>{a.user?.full_name || "Student"}</b>
                       {a.user?.email}
+                      <button
+                        type="button"
+                        aria-label={`Remove ${a.user?.email}`}
+                        onClick={() => {
+                          setSelected(t.id);
+                          unassign(a.user_id, t.id);
+                        }}
+                      >
+                        ×
+                      </button>
                     </span>
                   ))
                 ) : (
