@@ -1,5 +1,3 @@
-import { env } from "cloudflare:workers";
-
 type R2BucketLike = {
   put(key: string, value: ArrayBuffer, options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> }): Promise<unknown>;
   delete(key: string): Promise<void>;
@@ -15,7 +13,9 @@ export type VivaEnv = {
   SUPABASE_SECRET_KEY?: string;
 };
 
-export function getVivaEnv() { return env as unknown as VivaEnv; }
+export function getVivaEnv() {
+  return process.env as unknown as VivaEnv;
+}
 
 export function requireDatabase() {
   const runtime = getVivaEnv();
