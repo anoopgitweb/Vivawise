@@ -34,6 +34,7 @@ const navItems: { id: View; label: string; icon: string }[] = [
 ];
 
 export default function VivaApp() {
+  const [role, setRole] = useState<"student" | "admin" | null>(null);
   const [view, setView] = useState<View>("home");
   const [sessionOpen, setSessionOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -110,6 +111,8 @@ export default function VivaApp() {
     }
   }
 
+  if (!role) return <RoleChooser onChoose={(chosen) => { setRole(chosen); setView(chosen === "admin" ? "admin" : "home"); }} />;
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -136,6 +139,7 @@ export default function VivaApp() {
           <div><strong>Arjun Sharma</strong><span>B.Tech · Semester IV</span></div>
           <button aria-label="Profile options">•••</button>
         </div>
+        <button className="switch-role" onClick={() => { setRole(null); setSessionOpen(false); }}>⇄ Switch role</button>
       </aside>
 
       <section className="workspace">
@@ -177,6 +181,10 @@ export default function VivaApp() {
       </nav>
     </main>
   );
+}
+
+function RoleChooser({ onChoose }: { onChoose: (role: "student" | "admin") => void }) {
+  return <main className="role-page"><div className="role-panel"><Brand /><span className="eyebrow">WELCOME TO VIVAWISE</span><h1>How would you like to continue?</h1><p>Choose your workspace. Administrator access is protected by a separate sign-in.</p><div className="role-grid"><button onClick={() => onChoose("student")}><span className="role-icon student-role">S</span><div><strong>Continue as Student</strong><small>View assigned topics and attend mock vivas</small></div><i>→</i></button><button onClick={() => onChoose("admin")}><span className="role-icon admin-role">A</span><div><strong>Continue as Administrator</strong><small>Create topics, upload documents and assign students</small></div><i>→</i></button></div><small className="role-note">Your choice controls the workspace view. Protected actions are always verified by the server.</small></div></main>;
 }
 
 function Brand() {
