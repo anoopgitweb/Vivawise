@@ -126,6 +126,13 @@ const navItems: { id: View; label: string; icon: string }[] = [
   { id: "admin_usage", label: "Usage", icon: "↗" },
 ];
 
+function firstNameFromEmail(email?: string) {
+  const localPart = email?.split("@")[0]?.trim() || "";
+  const firstPart = localPart.split(/[._+\-]/)[0]?.replace(/\d+$/g, "") || "";
+  if (!firstPart) return "Student";
+  return firstPart.charAt(0).toUpperCase() + firstPart.slice(1).toLowerCase();
+}
+
 export default function VivaApp() {
   const [role, setRole] = useState<"student" | "admin" | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -414,7 +421,7 @@ export default function VivaApp() {
             setView={setView}
             attempts={studentAttempts}
             loading={attemptsLoading}
-            studentName={currentUser?.fullName || "Student"}
+            studentName={firstNameFromEmail(currentUser?.email)}
           />
         )}
         {view === "practice" && !sessionOpen && (
