@@ -1,7 +1,7 @@
 import { attachFile, createTopicVectorStore, uploadKnowledgeFile } from "../../../../lib/openai";
 import { requireSupabaseAdmin, supabaseAdmin } from "../../../../lib/supabase";
 
-export async function GET(request:Request){try{await requireSupabaseAdmin(request);const sb=supabaseAdmin();const {data,error}=await sb.from("tests").select("*,test_documents(count),test_assignments(count)").order("created_at",{ascending:false});if(error)throw error;return Response.json({topics:(data||[]).map(t=>({...t,document_count:t.test_documents?.[0]?.count||0,assignment_count:t.test_assignments?.[0]?.count||0}))});}catch(e){return fail(e);}}
+export async function GET(request:Request){try{await requireSupabaseAdmin(request);const sb=supabaseAdmin();const {data,error}=await sb.from("tests").select("*,test_documents(count),test_assignments(count)").order("created_at",{ascending:false});if(error)throw error;return Response.json({topics:(data||[]).map(t=>({...t,title:t.name,document_count:t.test_documents?.[0]?.count||0,assignment_count:t.test_assignments?.[0]?.count||0}))});}catch(e){return fail(e);}}
 export async function POST(request:Request){try{const user=await requireSupabaseAdmin(request);const sb=supabaseAdmin();
   if(request.headers.get("content-type")?.includes("multipart/form-data")){const form=await request.formData();const testId=String(form.get("topicId")||"");const file=form.get("file");if(!testId||!(file instanceof File))return Response.json({error:"Test and document are required."},{status:400});
     const {data:test,error:testError}=await sb.from("tests").select("id,name,openai_vector_store_id").eq("id",testId).single();if(testError||!test)return Response.json({error:"Test not found."},{status:404});
