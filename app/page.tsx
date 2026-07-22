@@ -1537,6 +1537,11 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
   async function upload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file || !selected) return;
+    if (file.size > 50 * 1024 * 1024) {
+      setMessage("This document exceeds the current 50 MB upload limit.");
+      event.target.value = "";
+      return;
+    }
     setMessage("Indexing document…");
     const form = new FormData();
     form.set("topicId", selected);

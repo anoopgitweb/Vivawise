@@ -94,7 +94,10 @@ export async function POST(request: Request) {
       const { error: storageError } = await sb.storage
         .from("test-documents")
         .upload(path, bytes, { contentType: file.type, upsert: false });
-      if (storageError) throw storageError;
+      if (storageError)
+        throw new Error(
+          `Supabase Storage upload failed: ${storageError.message}`,
+        );
       const { error: recordError } = await sb.from("test_documents").insert({
         id,
         test_id: testId,
@@ -109,7 +112,9 @@ export async function POST(request: Request) {
       });
       if (recordError) {
         await sb.storage.from("test-documents").remove([path]);
-        throw recordError;
+        throw new Error(
+          `Document database record failed: ${recordError.message}`,
+        );
       }
       let vectorId = test.openai_vector_store_id as string | null;
       let openaiFileId: string | null = null;
@@ -142,7 +147,8 @@ export async function POST(request: Request) {
           error_message: errorMessage,
         })
         .eq("id", id);
-      if (error) throw error;
+      if (error)
+        throw new Error(`Document status update failed: ${error.message}`);
       return Response.json({ ok: true, status });
     }
     const body = (await request.json()) as {
@@ -385,8 +391,13 @@ export async function POST(request: Request) {
 }
 function fail(error: unknown) {
   if (error instanceof Response) return error;
-  return Response.json(
-    { error: error instanceof Error ? error.message : "Unexpected error" },
-    { status: 500 },
-  );
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" && error && "message" in error
+        ? String(error.message)
+        : typeof error === "string"
+          ? error
+          : "Unexpected error";
+  return Response.json({ error: message }, { status: 500 });
 }
