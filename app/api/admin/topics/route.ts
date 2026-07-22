@@ -1,17 +1,223 @@
-import { attachFile, createTopicVectorStore, uploadKnowledgeFile } from "../../../../lib/openai";
+import {
+  attachFile,
+  createTopicVectorStore,
+  uploadKnowledgeFile,
+} from "../../../../lib/openai";
 import { requireSupabaseAdmin, supabaseAdmin } from "../../../../lib/supabase";
 
-export async function GET(request:Request){try{await requireSupabaseAdmin(request);const sb=supabaseAdmin();const [{data,error},{data:assignments,error:assignmentError},{data:users,error:userError}]=await Promise.all([sb.from("tests").select("*,test_documents(count),test_assignments(count)").order("created_at",{ascending:false}),sb.from("test_assignments").select("id,test_id,user_id,assigned_at").order("assigned_at",{ascending:false}),sb.from("profiles").select("id,email,full_name,role").eq("role","student").order("full_name")]);if(error)throw error;if(assignmentError)throw assignmentError;if(userError)throw userError;const userMap=new Map((users||[]).map(u=>[u.id,u]));return Response.json({topics:(data||[]).map(t=>({...t,title:t.name,document_count:t.test_documents?.[0]?.count||0,assignment_count:t.test_assignments?.[0]?.count||0,assignments:(assignments||[]).filter(a=>a.test_id===t.id).map(a=>({...a,user:userMap.get(a.user_id)}))})),users});}catch(e){return fail(e);}}
-export async function POST(request:Request){try{const user=await requireSupabaseAdmin(request);const sb=supabaseAdmin();
-  if(request.headers.get("content-type")?.includes("multipart/form-data")){const form=await request.formData();const testId=String(form.get("topicId")||"");const file=form.get("file");if(!testId||!(file instanceof File))return Response.json({error:"Test and document are required."},{status:400});
-    const {data:test,error:testError}=await sb.from("tests").select("id,name,openai_vector_store_id").eq("id",testId).single();if(testError||!test)return Response.json({error:"Test not found."},{status:404});
-    const id=crypto.randomUUID();const path=`${testId}/${id}-${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;const bytes=await file.arrayBuffer();const {error:storageError}=await sb.storage.from("test-documents").upload(path,bytes,{contentType:file.type,upsert:false});if(storageError)throw storageError;
-    let vectorId=test.openai_vector_store_id as string|null;let openaiFileId:string|null=null;let status="pending",errorMessage:string|null=null;
-    try{if(!vectorId){vectorId=await createTopicVectorStore(testId,test.name);await sb.from("tests").update({openai_vector_store_id:vectorId,updated_at:new Date().toISOString()}).eq("id",testId);}openaiFileId=await uploadKnowledgeFile(file);await attachFile(vectorId,openaiFileId);status="ready";}catch(error){errorMessage=error instanceof Error?error.message:"OpenAI indexing pending";}
-    const {error}=await sb.from("test_documents").insert({id,test_id:testId,file_name:file.name,storage_path:path,mime_type:file.type||"application/octet-stream",size_bytes:file.size,openai_file_id:openaiFileId,status,error_message:errorMessage,uploaded_by:user.id});if(error)throw error;return Response.json({ok:true,status});}
-  const body=await request.json() as {action?:string;title?:string;subject?:string;description?:string;difficulty?:string;topicId?:string;email?:string;userId?:string;questionCount?:number;timeLimitMinutes?:number;attemptsAllowed?:number;availableFrom?:string;dueAt?:string;passMark?:number;feedbackTiming?:string;hintsAllowed?:boolean;skippingAllowed?:boolean;answerMode?:string;instructions?:string;groundingMode?:string};
-  if(body.action==="create"){const {data,error}=await sb.from("tests").insert({name:body.title?.trim(),subject:body.subject?.trim(),description:body.description?.trim()||"",difficulty:body.difficulty||"Standard",created_by:user.id,question_count:body.questionCount||10,time_limit_minutes:body.timeLimitMinutes||20,attempts_allowed:body.attemptsAllowed||1,available_from:body.availableFrom||null,due_at:body.dueAt||null,pass_mark:body.passMark??60,feedback_timing:body.feedbackTiming||"after_each",hints_allowed:body.hintsAllowed??true,skipping_allowed:body.skippingAllowed??false,answer_mode:body.answerMode||"both",instructions:body.instructions?.trim()||"",grounding_mode:body.groundingMode||"documents_only"}).select("id").single();if(error)throw error;return Response.json({id:data.id});}
-  if(body.action==="assign"){let studentId=body.userId;const email=body.email?.trim().toLowerCase();if(!studentId&&email){const {data:student}=await sb.from("profiles").select("id").eq("email",email).eq("role","student").single();studentId=student?.id;}if(!studentId)return Response.json({error:"Choose a registered student."},{status:400});const {data:student}=await sb.from("profiles").select("id").eq("id",studentId).eq("role","student").single();if(!student)return Response.json({error:"The selected student was not found."},{status:404});const {error}=await sb.from("test_assignments").upsert({test_id:body.topicId,user_id:student.id,assigned_by:user.id},{onConflict:"test_id,user_id"});if(error)throw error;return Response.json({ok:true});}
-  return Response.json({error:"Unknown action."},{status:400});
-}catch(e){return fail(e);}}
-function fail(error:unknown){if(error instanceof Response)return error;return Response.json({error:error instanceof Error?error.message:"Unexpected error"},{status:500});}
+export async function GET(request: Request) {
+  try {
+    await requireSupabaseAdmin(request);
+    const sb = supabaseAdmin();
+    const [
+      { data, error },
+      { data: assignments, error: assignmentError },
+      { data: users, error: userError },
+      { data: attempts, error: attemptError },
+    ] = await Promise.all([
+      sb
+        .from("tests")
+        .select("*,test_documents(count),test_assignments(count)")
+        .order("created_at", { ascending: false }),
+      sb
+        .from("test_assignments")
+        .select("id,test_id,user_id,assigned_at")
+        .order("assigned_at", { ascending: false }),
+      sb
+        .from("profiles")
+        .select("id,email,full_name,role")
+        .eq("role", "student")
+        .order("full_name"),
+      sb
+        .from("test_attempts")
+        .select("id,test_id,user_id,status,score,started_at,completed_at")
+        .order("started_at", { ascending: false }),
+    ]);
+    if (error) throw error;
+    if (assignmentError) throw assignmentError;
+    if (userError) throw userError;
+    if (attemptError) throw attemptError;
+    const userMap = new Map((users || []).map((u) => [u.id, u]));
+    return Response.json({
+      topics: (data || []).map((t) => ({
+        ...t,
+        title: t.name,
+        document_count: t.test_documents?.[0]?.count || 0,
+        assignment_count: t.test_assignments?.[0]?.count || 0,
+        assignments: (assignments || [])
+          .filter((a) => a.test_id === t.id)
+          .map((a) => ({ ...a, user: userMap.get(a.user_id) })),
+        attempts: (attempts || [])
+          .filter((a) => a.test_id === t.id)
+          .map((a) => ({ ...a, user: userMap.get(a.user_id) })),
+      })),
+      users,
+    });
+  } catch (e) {
+    return fail(e);
+  }
+}
+export async function POST(request: Request) {
+  try {
+    const user = await requireSupabaseAdmin(request);
+    const sb = supabaseAdmin();
+    if (request.headers.get("content-type")?.includes("multipart/form-data")) {
+      const form = await request.formData();
+      const testId = String(form.get("topicId") || "");
+      const file = form.get("file");
+      if (!testId || !(file instanceof File))
+        return Response.json(
+          { error: "Test and document are required." },
+          { status: 400 },
+        );
+      const { data: test, error: testError } = await sb
+        .from("tests")
+        .select("id,name,openai_vector_store_id")
+        .eq("id", testId)
+        .single();
+      if (testError || !test)
+        return Response.json({ error: "Test not found." }, { status: 404 });
+      const id = crypto.randomUUID();
+      const path = `${testId}/${id}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const bytes = await file.arrayBuffer();
+      const { error: storageError } = await sb.storage
+        .from("test-documents")
+        .upload(path, bytes, { contentType: file.type, upsert: false });
+      if (storageError) throw storageError;
+      let vectorId = test.openai_vector_store_id as string | null;
+      let openaiFileId: string | null = null;
+      let status = "pending",
+        errorMessage: string | null = null;
+      try {
+        if (!vectorId) {
+          vectorId = await createTopicVectorStore(testId, test.name);
+          await sb
+            .from("tests")
+            .update({
+              openai_vector_store_id: vectorId,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", testId);
+        }
+        openaiFileId = await uploadKnowledgeFile(file);
+        await attachFile(vectorId, openaiFileId);
+        status = "ready";
+      } catch (error) {
+        errorMessage =
+          error instanceof Error ? error.message : "OpenAI indexing pending";
+      }
+      const { error } = await sb
+        .from("test_documents")
+        .insert({
+          id,
+          test_id: testId,
+          file_name: file.name,
+          storage_path: path,
+          mime_type: file.type || "application/octet-stream",
+          size_bytes: file.size,
+          openai_file_id: openaiFileId,
+          status,
+          error_message: errorMessage,
+          uploaded_by: user.id,
+        });
+      if (error) throw error;
+      return Response.json({ ok: true, status });
+    }
+    const body = (await request.json()) as {
+      action?: string;
+      title?: string;
+      subject?: string;
+      description?: string;
+      difficulty?: string;
+      topicId?: string;
+      email?: string;
+      userId?: string;
+      questionCount?: number;
+      timeLimitMinutes?: number;
+      attemptsAllowed?: number;
+      availableFrom?: string;
+      dueAt?: string;
+      passMark?: number;
+      feedbackTiming?: string;
+      hintsAllowed?: boolean;
+      skippingAllowed?: boolean;
+      answerMode?: string;
+      instructions?: string;
+      groundingMode?: string;
+    };
+    if (body.action === "create") {
+      const { data, error } = await sb
+        .from("tests")
+        .insert({
+          name: body.title?.trim(),
+          subject: body.subject?.trim(),
+          description: body.description?.trim() || "",
+          difficulty: body.difficulty || "Standard",
+          created_by: user.id,
+          question_count: body.questionCount || 10,
+          time_limit_minutes: body.timeLimitMinutes || 20,
+          attempts_allowed: body.attemptsAllowed || 1,
+          available_from: body.availableFrom || null,
+          due_at: body.dueAt || null,
+          pass_mark: body.passMark ?? 60,
+          feedback_timing: body.feedbackTiming || "after_each",
+          hints_allowed: body.hintsAllowed ?? true,
+          skipping_allowed: body.skippingAllowed ?? false,
+          answer_mode: body.answerMode || "both",
+          instructions: body.instructions?.trim() || "",
+          grounding_mode: body.groundingMode || "documents_only",
+        })
+        .select("id")
+        .single();
+      if (error) throw error;
+      return Response.json({ id: data.id });
+    }
+    if (body.action === "assign") {
+      let studentId = body.userId;
+      const email = body.email?.trim().toLowerCase();
+      if (!studentId && email) {
+        const { data: student } = await sb
+          .from("profiles")
+          .select("id")
+          .eq("email", email)
+          .eq("role", "student")
+          .single();
+        studentId = student?.id;
+      }
+      if (!studentId)
+        return Response.json(
+          { error: "Choose a registered student." },
+          { status: 400 },
+        );
+      const { data: student } = await sb
+        .from("profiles")
+        .select("id")
+        .eq("id", studentId)
+        .eq("role", "student")
+        .single();
+      if (!student)
+        return Response.json(
+          { error: "The selected student was not found." },
+          { status: 404 },
+        );
+      const { error } = await sb
+        .from("test_assignments")
+        .upsert(
+          { test_id: body.topicId, user_id: student.id, assigned_by: user.id },
+          { onConflict: "test_id,user_id" },
+        );
+      if (error) throw error;
+      return Response.json({ ok: true });
+    }
+    return Response.json({ error: "Unknown action." }, { status: 400 });
+  } catch (e) {
+    return fail(e);
+  }
+}
+function fail(error: unknown) {
+  if (error instanceof Response) return error;
+  return Response.json(
+    { error: error instanceof Error ? error.message : "Unexpected error" },
+    { status: 500 },
+  );
+}

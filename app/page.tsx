@@ -28,6 +28,8 @@ type VivaFeedback = {
   nextHint: string;
   nextTopic: string;
   sourceBasis: string;
+  completed?: boolean;
+  demo?: boolean;
 };
 type AssignedTopic = {
   id: string;
@@ -748,6 +750,8 @@ function VivaSession(props: {
   const [feedback, setFeedback] = useState<VivaFeedback | null>(null);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState("");
+  const [maxQuestions, setMaxQuestions] = useState(10);
+  const [demoMode, setDemoMode] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -768,19 +772,14 @@ function VivaSession(props: {
         setQuestionText(data.question);
         setHint(data.hint);
         setSourceBasis(data.sourceBasis);
+        setMaxQuestions(data.settings?.questionCount || 10);
+        setDemoMode(Boolean(data.demo));
       })
       .catch((error) => {
-        if (active) {
+        if (active)
           setApiError(
-            error instanceof Error ? error.message : "AI examiner unavailable",
+            error instanceof Error ? error.message : "Could not start the viva",
           );
-          setQuestionText(
-            "Why is the time complexity of searching in a balanced binary search tree logarithmic?",
-          );
-          setHint(
-            "Demo mode: explain the relationship between tree height and the number of nodes.",
-          );
-        }
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -793,9 +792,7 @@ function VivaSession(props: {
   async function evaluateAnswer() {
     if (!props.answer.trim() || loading) return;
     if (!sessionId) {
-      setApiError(
-        "Connect the OpenAI key and database to evaluate live answers.",
-      );
+      setApiError("This viva session could not be started.");
       return;
     }
     setLoading(true);
@@ -824,6 +821,10 @@ function VivaSession(props: {
 
   function advance() {
     if (!feedback) return;
+    if (feedback.completed) {
+      props.onExit();
+      return;
+    }
     setQuestionText(feedback.nextQuestion);
     setHint(feedback.nextHint);
     setSourceBasis(feedback.sourceBasis);
@@ -831,7 +832,7 @@ function VivaSession(props: {
     props.nextQuestion();
   }
 
-  const progress = props.question * 10;
+  const progress = Math.min(100, (props.question / maxQuestions) * 100);
   return (
     <div className="session-page">
       <header className="session-header">
@@ -841,10 +842,13 @@ function VivaSession(props: {
         <div>
           <strong>{props.topic.title}</strong>
           <span>
-            {props.topic.difficulty} · {props.topic.subject}
+            {demoMode ? "Demo mode" : props.topic.difficulty} ·{" "}
+            {props.topic.subject}
           </span>
         </div>
-        <span className="session-counter">{props.question} / 10</span>
+        <span className="session-counter">
+          {props.question} / {maxQuestions}
+        </span>
       </header>
       <div className="session-progress">
         <i style={{ width: `${progress}%` }} />
@@ -923,6 +927,31 @@ function Feedback({
   feedback: VivaFeedback;
   onNext: () => void;
 }) {
+  if (feedback.completed)
+    return (
+      <section className="feedback-card completion-card">
+        <div className="completion-mark">✓</div>
+        <span className="eyebrow">VIVA COMPLETED</span>
+        <h2>{feedback.demo ? "Demo attempt completed" : "Test completed"}</h2>
+        <div className="completion-score">
+          {Number(feedback.score).toFixed(1)}
+          <small>/10 on final answer</small>
+        </div>
+        <p>{feedback.summary}</p>
+        {feedback.demo && (
+          <div className="api-notice">
+            <strong>Demo result</strong>
+            <span>
+              This demonstrates the completed-test experience and is not
+              document-grounded evaluation.
+            </span>
+          </div>
+        )}
+        <button className="primary-button" onClick={onNext}>
+          Return to dashboard
+        </button>
+      </section>
+    );
   return (
     <section className="feedback-card">
       <div className="feedback-top">
@@ -1113,10 +1142,19 @@ type AdminAssignment = {
   assigned_at: string;
   user?: AdminUser;
 };
+type AdminAttempt = {
+  id: string;
+  status: string;
+  score?: number;
+  started_at: string;
+  completed_at?: string;
+  user?: AdminUser;
+};
 type AdminTopic = AssignedTopic & {
   document_count?: number;
   assignment_count?: number;
   assignments?: AdminAssignment[];
+  attempts?: AdminAttempt[];
 };
 function AdminPanel() {
   const [authenticated, setAuthenticated] = useState(true);
@@ -1475,6 +1513,38 @@ function AdminPanel() {
                   ))
                 ) : (
                   <em>No students assigned</em>
+                )}
+              </div>
+              <div className="attempt-results">
+                {t.attempts?.length ? (
+                  t.attempts.map((attempt) => (
+                    <div key={attempt.id}>
+                      <span>
+                        <b>
+                          {attempt.user?.full_name ||
+                            attempt.user?.email ||
+                            "Student"}
+                        </b>
+                        <small>
+                          {attempt.status === "completed"
+                            ? "Completed"
+                            : "In progress"}
+                        </small>
+                      </span>
+                      <strong>
+                        {attempt.status === "completed"
+                          ? `${Math.round(Number(attempt.score || 0))}%`
+                          : "—"}
+                      </strong>
+                      <time>
+                        {new Date(
+                          attempt.completed_at || attempt.started_at,
+                        ).toLocaleString()}
+                      </time>
+                    </div>
+                  ))
+                ) : (
+                  <em>No attempts yet</em>
                 )}
               </div>
             </div>
