@@ -123,6 +123,9 @@ export async function POST(request: Request) {
           { error: "This mock viva is not assigned to you." },
           { status: 403 },
         );
+      const totalQuestions = Number(topic.question_count) || 10;
+      const timeLimitMinutes = Number(topic.time_limit_minutes) || 20;
+      const attemptsAllowed = Number(topic.attempts_allowed) || 1;
       const now = Date.now();
       if (
         topic.available_from &&
@@ -143,10 +146,10 @@ export async function POST(request: Request) {
         .eq("test_id", topic.id)
         .eq("user_id", user.userId)
         .eq("status", "completed");
-      if ((attemptCount || 0) >= topic.attempts_allowed)
+      if ((attemptCount || 0) >= attemptsAllowed)
         return Response.json(
           {
-            error: `You have used all ${topic.attempts_allowed} allowed attempt(s).`,
+            error: `You have used all ${attemptsAllowed} allowed attempt(s).`,
           },
           { status: 403 },
         );
@@ -174,7 +177,7 @@ export async function POST(request: Request) {
         .select("id")
         .single();
       if (error) throw error;
-      const prompt = `You are Vivawise, a rigorous university viva examiner. Generate question 1 of ${topic.question_count} for '${topic.name}'. ${topic.instructions ? `Instructions: ${topic.instructions}` : ""} ${topic.openai_vector_store_id ? "You MUST use file search. Ask a question supported by the attached test documents only. Do not use outside knowledge. If the documents do not support a suitable question, state that the source material is insufficient." : "Use foundational knowledge only because this test permits it."}`;
+      const prompt = `You are Vivawise, a rigorous university viva examiner. Generate question 1 of ${totalQuestions} for '${topic.name}'. ${topic.instructions ? `Instructions: ${topic.instructions}` : ""} ${topic.openai_vector_store_id ? "You MUST use file search. Ask a question supported by the attached test documents only. Do not use outside knowledge. If the documents do not support a suitable question, state that the source material is insufficient." : "Use foundational knowledge only because this test permits it."}`;
       const result = demoMode
         ? {
             question: demoQuestions[0],
@@ -194,8 +197,8 @@ export async function POST(request: Request) {
         grounded: !demoMode && Boolean(topic.openai_vector_store_id),
         demo: demoMode,
         settings: {
-          questionCount: topic.question_count,
-          timeLimitMinutes: topic.time_limit_minutes,
+          questionCount: totalQuestions,
+          timeLimitMinutes,
           hintsAllowed: topic.hints_allowed,
           skippingAllowed: topic.skipping_allowed,
           answerMode: topic.answer_mode,
@@ -219,11 +222,12 @@ export async function POST(request: Request) {
       if (!owned)
         return Response.json({ error: "Session not found." }, { status: 404 });
       const test = (owned as any).tests;
+      const totalQuestions = Number(test?.question_count) || 10;
+      const timeLimitMinutes = Number(test?.time_limit_minutes) || 20;
       const vectorStoreId = test?.openai_vector_store_id;
       if (
         Date.now() >
-        new Date((owned as any).started_at).getTime() +
-          test.time_limit_minutes * 60000
+        new Date((owned as any).started_at).getTime() + timeLimitMinutes * 60000
       )
         return Response.json(
           { error: "The time limit for this attempt has expired." },
@@ -233,15 +237,38 @@ export async function POST(request: Request) {
         .from("attempt_answers")
         .select("id", { count: "exact", head: true })
         .eq("attempt_id", body.sessionId);
-      if ((answerCount || 0) >= test.question_count)
-        return Response.json(
-          { error: "This viva is already complete." },
-          { status: 409 },
-        );
-      const prompt = `You are Vivawise, a fair university viva examiner. ${vectorStoreId ? "You MUST use file search and evaluate only against the attached test documents. Do not introduce outside facts." : "Evaluate using foundational knowledge."} Question: ${body.question}. Student answer: ${body.answer}. Score 0 to 10. Then generate question ${(answerCount || 0) + 2} of ${test.question_count}, also grounded only in the attached documents.`;
+      if ((answerCount || 0) >= totalQuestions) {
+        const { data: existingAnswers } = await sb
+          .from("attempt_answers")
+          .select("score")
+          .eq("attempt_id", body.sessionId);
+        const average =
+          (existingAnswers || []).reduce(
+            (sum, row) => sum + Number(row.score),
+            0,
+          ) / Math.max(1, (existingAnswers || []).length);
+        await sb
+          .from("test_attempts")
+          .update({
+            status: "completed",
+            score: average * 10,
+            completed_at: new Date().toISOString(),
+          })
+          .eq("id", body.sessionId);
+        return Response.json({
+          ...demoFeedback("", totalQuestions, totalQuestions),
+          score: average,
+          maxScore: 10,
+          summary:
+            "Your saved attempt has been completed and the result is now available.",
+          completed: true,
+          demo: !getVivaEnv().OPENAI_API_KEY,
+        });
+      }
+      const prompt = `You are Vivawise, a fair university viva examiner. ${vectorStoreId ? "You MUST use file search and evaluate only against the attached test documents. Do not introduce outside facts." : "Evaluate using foundational knowledge."} Question: ${body.question}. Student answer: ${body.answer}. Score 0 to 10. Then generate question ${(answerCount || 0) + 2} of ${totalQuestions}, also grounded only in the attached documents.`;
       const demoMode = !getVivaEnv().OPENAI_API_KEY;
       const result = demoMode
-        ? demoFeedback(body.answer, (answerCount || 0) + 1, test.question_count)
+        ? demoFeedback(body.answer, (answerCount || 0) + 1, totalQuestions)
         : await createVivaResponse(
             prompt,
             "viva_feedback",
@@ -249,17 +276,15 @@ export async function POST(request: Request) {
             vectorStoreId,
           );
       const score = Math.max(0, Math.min(10, Number(result.score) || 0));
-      const { error } = await sb
-        .from("attempt_answers")
-        .insert({
-          attempt_id: body.sessionId,
-          question: body.question,
-          answer: body.answer,
-          score,
-          feedback: result,
-        });
+      const { error } = await sb.from("attempt_answers").insert({
+        attempt_id: body.sessionId,
+        question: body.question,
+        answer: body.answer,
+        score,
+        feedback: result,
+      });
       if (error) throw error;
-      const completed = (answerCount || 0) + 1 >= test.question_count;
+      const completed = (answerCount || 0) + 1 >= totalQuestions;
       if (completed) {
         const { data: all } = await sb
           .from("attempt_answers")
