@@ -2337,6 +2337,54 @@ button {
     transform: translateY(0);
   }
 }
+.indexing-status {
+  position: fixed;
+  z-index: 45;
+  right: 24px;
+  bottom: 24px;
+  width: min(420px, calc(100vw - 32px));
+  padding: 16px;
+  border: 1px solid #b9ded6;
+  border-radius: 14px;
+  background: white;
+  box-shadow: 0 18px 50px rgba(18, 45, 54, 0.2);
+}
+.indexing-status > div {
+  display: grid;
+  gap: 4px;
+}
+.indexing-status strong {
+  font-size: 11px;
+}
+.indexing-status span,
+.indexing-status small {
+  color: var(--muted);
+  font-size: 9px;
+}
+.indexing-status > i {
+  display: block;
+  height: 5px;
+  margin: 12px 0 8px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #e6efec;
+}
+.indexing-status > i > span {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--teal);
+  animation: indexing-slide 1.4s ease-in-out infinite;
+}
+@keyframes indexing-slide {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(260%);
+  }
+}
 .assigned-users > span {
   position: relative;
   padding-right: 28px;

@@ -1422,6 +1422,11 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
   const [instructions, setInstructions] = useState("");
   const [createFiles, setCreateFiles] = useState<File[]>([]);
   const [creating, setCreating] = useState(false);
+  const [indexing, setIndexing] = useState<{
+    fileName: string;
+    startedAt: number;
+  } | null>(null);
+  const [indexingElapsed, setIndexingElapsed] = useState(0);
   const [selected, setSelected] = useState("");
   const [selectedUser, setSelectedUser] = useState("");
   const [savedInstructions, setSavedInstructions] = useState("");
@@ -1455,6 +1460,17 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
     const timer = window.setTimeout(() => setMessage(""), 5000);
     return () => window.clearTimeout(timer);
   }, [message]);
+  useEffect(() => {
+    if (!indexing) {
+      setIndexingElapsed(0);
+      return;
+    }
+    const update = () =>
+      setIndexingElapsed(Math.floor((Date.now() - indexing.startedAt) / 1000));
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [indexing]);
   async function create(event: React.FormEvent) {
     event.preventDefault();
     setCreating(true);
@@ -1493,6 +1509,7 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
     let pending = 0;
     for (const file of createFiles) {
       setMessage(`Uploading ${file.name}…`);
+      setIndexing({ fileName: file.name, startedAt: Date.now() });
       const form = new FormData();
       form.set("topicId", d.id);
       form.set("file", file);
@@ -1504,6 +1521,7 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
       if (uploadResponse.ok && uploadData.status === "ready") ready += 1;
       else pending += 1;
     }
+    setIndexing(null);
     setTitle("");
     setSubject("");
     setDescription("");
@@ -1543,14 +1561,26 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
       return;
     }
     setMessage("Indexing document…");
+    setIndexing({ fileName: file.name, startedAt: Date.now() });
     const form = new FormData();
     form.set("topicId", selected);
     form.set("file", file);
-    const r = await fetch("/api/admin/topics", { method: "POST", body: form });
-    const d = await r.json();
-    setMessage(r.ok ? "Document uploaded and indexed." : d.error);
-    if (r.ok) load();
-    event.target.value = "";
+    try {
+      const r = await fetch("/api/admin/topics", {
+        method: "POST",
+        body: form,
+      });
+      const d = await r.json();
+      setMessage(r.ok ? "Document uploaded and indexed." : d.error);
+      if (r.ok) await load();
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Document upload failed.",
+      );
+    } finally {
+      setIndexing(null);
+      event.target.value = "";
+    }
   }
   async function manageDocument(
     action: "retry_document" | "delete_document",
@@ -1566,20 +1596,26 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
         ? "Retrying document indexing…"
         : "Deleting document…",
     );
-    const response = await fetch("/api/admin/topics", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, documentId: document.id }),
-    });
-    const data = await response.json();
-    setMessage(
-      response.ok
-        ? action === "retry_document"
-          ? "Document indexed and ready for viva questions."
-          : "Document deleted."
-        : data.error || "Document operation failed.",
-    );
-    await load();
+    if (action === "retry_document")
+      setIndexing({ fileName: document.file_name, startedAt: Date.now() });
+    try {
+      const response = await fetch("/api/admin/topics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, documentId: document.id }),
+      });
+      const data = await response.json();
+      setMessage(
+        response.ok
+          ? action === "retry_document"
+            ? "Document indexed and ready for viva questions."
+            : "Document deleted."
+          : data.error || "Document operation failed.",
+      );
+      await load();
+    } finally {
+      if (action === "retry_document") setIndexing(null);
+    }
   }
   useEffect(() => {
     const module = topics.find((topic) => topic.id === selected);
@@ -1691,6 +1727,23 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
           >
             ×
           </button>
+        </div>
+      )}
+      {indexing && (
+        <div className="indexing-status" role="status" aria-live="polite">
+          <div>
+            <strong>Indexing {indexing.fileName}</strong>
+            <span>
+              Elapsed: {formatDuration(indexingElapsed)} ·{" "}
+              {indexingElapsed < 90
+                ? `Estimated remaining: ${formatDuration(90 - indexingElapsed)}`
+                : "Finalizing — this document is taking longer than usual"}
+            </span>
+          </div>
+          <i>
+            <span />
+          </i>
+          <small>The remaining time is an estimate; keep this page open.</small>
         </div>
       )}
       <div className="admin-grid">
@@ -2423,6 +2476,14 @@ function formatBytes(value: number) {
   return value < 1024 * 1024
     ? `${Math.max(1, Math.round(value / 1024))} KB`
     : `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatDuration(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes
+    ? `${minutes}m ${seconds.toString().padStart(2, "0")}s`
+    : `${seconds}s`;
 }
 
 function formatDate(value: number) {
