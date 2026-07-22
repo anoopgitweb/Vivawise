@@ -1444,6 +1444,11 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
   useEffect(() => {
     void load();
   }, []);
+  useEffect(() => {
+    if (!message || message.includes("…")) return;
+    const timer = window.setTimeout(() => setMessage(""), 5000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
   async function create(event: React.FormEvent) {
     event.preventDefault();
     setCreating(true);
@@ -1660,7 +1665,23 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
           </p>
         </div>
       </div>
-      {message && <div className="admin-message">{message}</div>}
+      {message && (
+        <div
+          className="admin-message admin-toast"
+          role="status"
+          aria-live="polite"
+        >
+          <span>✓</span>
+          {message}
+          <button
+            type="button"
+            aria-label="Dismiss message"
+            onClick={() => setMessage("")}
+          >
+            ×
+          </button>
+        </div>
+      )}
       <div className="admin-grid">
         {mode === "create" && (
           <form className="admin-card" onSubmit={create}>
