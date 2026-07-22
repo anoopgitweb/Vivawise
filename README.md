@@ -35,6 +35,12 @@ The server derives a one-way identifier from the authenticated user's email. Eac
 
 Local development uses `local-student@vivawise.dev`. Hosted requests require the authenticated user header supplied by the Sites platform.
 
+## Prototype admin
+
+Open **Admin** and sign in with `admin` / `Vivawise@2026`. The admin can create mock-viva topics, upload topic-specific source documents, and assign them to an exact student email. Students only see assignments matching the authenticated email supplied by the host. Local development uses `local-student@vivawise.dev`.
+
+These credentials are temporary and hard-coded server-side for prototype testing. Replace them with Supabase authentication and role-based authorization before public use.
+
 ## Environment
 
 - `OPENAI_API_KEY` — required; keep this secret

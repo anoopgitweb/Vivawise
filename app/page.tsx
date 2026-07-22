@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 
-type View = "home" | "practice" | "progress" | "settings";
+type View = "home" | "practice" | "progress" | "settings" | "admin";
 type Difficulty = "Foundation" | "Standard" | "Challenge";
 type DocumentRecord = { id?: string; name: string; size: string; status: string; date: string; error?: string };
 type VivaFeedback = {
@@ -11,6 +11,7 @@ type VivaFeedback = {
   conceptScore: number; clarityScore: number; completenessScore: number; modelAnswer: string;
   nextQuestion: string; nextHint: string; nextTopic: string; sourceBasis: string;
 };
+type AssignedTopic = { id: string; title: string; subject: string; description: string; difficulty: Difficulty; documentCount: number };
 
 const subjects = [
   { name: "Data Structures", unit: "Unit 3", mastery: 74, color: "mint", due: "12 topics" },
@@ -29,6 +30,7 @@ const navItems: { id: View; label: string; icon: string }[] = [
   { id: "practice", label: "Practice", icon: "◉" },
   { id: "progress", label: "Progress", icon: "↗" },
   { id: "settings", label: "Settings", icon: "⚙" },
+  { id: "admin", label: "Admin", icon: "A" },
 ];
 
 export default function VivaApp() {
@@ -41,6 +43,8 @@ export default function VivaApp() {
   const [recording, setRecording] = useState(false);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [documentError, setDocumentError] = useState("");
+  const [assignedTopics, setAssignedTopics] = useState<AssignedTopic[]>([]);
+  const [selectedTopic, setSelectedTopic] = useState<AssignedTopic | null>(null);
 
   useEffect(() => {
     fetch("/api/documents").then(async (response) => {
@@ -51,7 +55,12 @@ export default function VivaApp() {
     })))).catch(() => { /* Local bindings are unavailable until configured; upload will show the actionable error. */ });
   }, []);
 
-  function beginPractice() {
+  useEffect(() => { fetch("/api/assignments").then((r) => r.json()).then((data) => { setAssignedTopics(data.topics ?? []); setSelectedTopic((current) => current ?? data.topics?.[0] ?? null); }).catch(() => {}); }, [view]);
+
+  function beginPractice(topic?: AssignedTopic) {
+    const chosen = topic ?? selectedTopic ?? assignedTopics[0];
+    if (!chosen) { setView("practice"); setSessionOpen(false); return; }
+    setSelectedTopic(chosen);
     setView("practice");
     setSessionOpen(true);
     setFeedbackOpen(false);
@@ -138,10 +147,11 @@ export default function VivaApp() {
           </div>
         </header>
 
-        {view === "home" && <Dashboard onStart={beginPractice} setView={setView} />}
-        {view === "practice" && !sessionOpen && <PracticeSetup difficulty={difficulty} setDifficulty={setDifficulty} onStart={beginPractice} />}
+        {view === "home" && <Dashboard onStart={() => beginPractice()} setView={setView} />}
+        {view === "practice" && !sessionOpen && <PracticeSetup topics={assignedTopics} selected={selectedTopic} setSelected={setSelectedTopic} onStart={() => beginPractice()} />}
         {view === "progress" && <Progress />}
         {view === "settings" && <Settings documents={documents} addDocuments={addDocuments} documentError={documentError} />}
+        {view === "admin" && <AdminPanel />}
         {view === "practice" && sessionOpen && (
           <VivaSession
             answer={answer}
@@ -153,6 +163,7 @@ export default function VivaApp() {
             submitAnswer={submitAnswer}
             nextQuestion={nextQuestion}
             onExit={() => { setSessionOpen(false); setView("home"); }}
+            topic={selectedTopic!}
           />
         )}
       </section>
@@ -227,20 +238,18 @@ function Dashboard({ onStart, setView }: { onStart: () => void; setView: (view: 
   );
 }
 
-function PracticeSetup({ difficulty, setDifficulty, onStart }: { difficulty: Difficulty; setDifficulty: (value: Difficulty) => void; onStart: () => void }) {
+function PracticeSetup({ topics, selected, setSelected, onStart }: { topics: AssignedTopic[]; selected: AssignedTopic | null; setSelected: (topic: AssignedTopic) => void; onStart: () => void }) {
   return <div className="page narrow-page">
     <div className="page-heading"><div><span className="eyebrow">PERSONALISED PRACTICE</span><h1>Build your next viva</h1><p>Choose a subject and let your AI examiner adapt to every answer.</p></div></div>
     <section className="setup-card">
-      <div className="setup-step"><span>1</span><div><h3>Choose a subject</h3><p>Your uploaded syllabus controls the scope.</p></div></div>
-      <div className="choice-grid">{subjects.map((subject, i) => <button className={i === 0 ? "choice selected" : "choice"} key={subject.name}><span className={`subject-icon ${subject.color}`}>{subject.name.slice(0, 2).toUpperCase()}</span><div><strong>{subject.name}</strong><small>{subject.unit} · {subject.due}</small></div><i>✓</i></button>)}</div>
-      <div className="setup-step"><span>2</span><div><h3>Set the challenge</h3><p>You can change this during the session.</p></div></div>
-      <div className="difficulty-row">{(["Foundation", "Standard", "Challenge"] as Difficulty[]).map((value) => <button className={difficulty === value ? "selected" : ""} key={value} onClick={() => setDifficulty(value)}><strong>{value}</strong><small>{value === "Foundation" ? "Recall & explain" : value === "Standard" ? "Apply & compare" : "Defend & analyse"}</small></button>)}</div>
-      <div className="session-summary"><div><span>10</span><small>questions</small></div><div><span>~18</span><small>minutes</small></div><div><span>Voice</span><small>or keyboard</small></div><button className="primary-button" onClick={onStart}>Begin viva <span>→</span></button></div>
+      <div className="setup-step"><span>1</span><div><h3>Your assigned mock vivas</h3><p>Only topics assigned to your signed-in email appear here.</p></div></div>
+      {topics.length ? <div className="choice-grid">{topics.map((topic) => <button className={selected?.id === topic.id ? "choice selected" : "choice"} onClick={() => setSelected(topic)} key={topic.id}><span className="subject-icon mint">{topic.subject.slice(0, 2).toUpperCase()}</span><div><strong>{topic.title}</strong><small>{topic.subject} · {topic.difficulty} · {topic.documentCount} docs</small></div><i>✓</i></button>)}</div> : <div className="empty-assignment"><strong>No mock viva assigned yet</strong><span>Ask your administrator to assign a topic to your signed-in email.</span></div>}
+      <div className="session-summary"><div><span>10</span><small>questions</small></div><div><span>~18</span><small>minutes</small></div><div><span>{selected?.difficulty ?? "—"}</span><small>admin-selected</small></div><button className="primary-button" disabled={!selected} onClick={onStart}>Begin viva <span>→</span></button></div>
     </section>
   </div>;
 }
 
-function VivaSession(props: { answer: string; setAnswer: (value: string) => void; question: number; recording: boolean; setRecording: (value: boolean) => void; feedbackOpen: boolean; submitAnswer: () => void; nextQuestion: () => void; onExit: () => void }) {
+function VivaSession(props: { topic: AssignedTopic; answer: string; setAnswer: (value: string) => void; question: number; recording: boolean; setRecording: (value: boolean) => void; feedbackOpen: boolean; submitAnswer: () => void; nextQuestion: () => void; onExit: () => void }) {
   const [sessionId, setSessionId] = useState("");
   const [questionText, setQuestionText] = useState("Preparing a syllabus-grounded question…");
   const [hint, setHint] = useState("Your examiner is reviewing the relevant learning material.");
@@ -251,20 +260,20 @@ function VivaSession(props: { answer: string; setAnswer: (value: string) => void
 
   useEffect(() => {
     let active = true;
-    fetch("/api/viva", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start", subject: "Data Structures", difficulty: "Standard" }) })
+    fetch("/api/viva", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start", topicId: props.topic.id }) })
       .then(async (response) => { const data = await response.json(); if (!response.ok) throw new Error(data.error || "Could not start the viva"); return data; })
       .then((data) => { if (!active) return; setSessionId(data.sessionId); setQuestionText(data.question); setHint(data.hint); setSourceBasis(data.sourceBasis); })
       .catch((error) => { if (active) { setApiError(error instanceof Error ? error.message : "AI examiner unavailable"); setQuestionText("Why is the time complexity of searching in a balanced binary search tree logarithmic?"); setHint("Demo mode: explain the relationship between tree height and the number of nodes."); } })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [props.topic.id]);
 
   async function evaluateAnswer() {
     if (!props.answer.trim() || loading) return;
     if (!sessionId) { setApiError("Connect the OpenAI key and database to evaluate live answers."); return; }
     setLoading(true); setApiError("");
     try {
-      const response = await fetch("/api/viva", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "answer", sessionId, subject: "Data Structures", difficulty: "Standard", question: questionText, answer: props.answer, questionNumber: props.question }) });
+      const response = await fetch("/api/viva", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "answer", sessionId, question: questionText, answer: props.answer, questionNumber: props.question }) });
       const data = await response.json(); if (!response.ok) throw new Error(data.error || "Evaluation failed");
       setFeedback(data as VivaFeedback);
     } catch (error) { setApiError(error instanceof Error ? error.message : "Evaluation failed"); }
@@ -278,7 +287,7 @@ function VivaSession(props: { answer: string; setAnswer: (value: string) => void
 
   const progress = props.question * 10;
   return <div className="session-page">
-    <header className="session-header"><button onClick={props.onExit}>← <span>Exit session</span></button><div><strong>Data Structures</strong><span>Standard practice</span></div><span className="session-counter">{props.question} / 10</span></header>
+    <header className="session-header"><button onClick={props.onExit}>← <span>Exit session</span></button><div><strong>{props.topic.title}</strong><span>{props.topic.difficulty} · {props.topic.subject}</span></div><span className="session-counter">{props.question} / 10</span></header>
     <div className="session-progress"><i style={{ width: `${progress}%` }} /></div>
     <div className="session-content">
       <div className="examiner"><div className="examiner-avatar">AI<span /></div><div><strong>Your examiner</strong><span>Listening carefully</span></div></div>
@@ -321,6 +330,22 @@ function Progress() {
 }
 
 function Metric({ value, label, change }: { value: string; label: string; change: string }) { return <div className="metric-card"><strong>{value}</strong><span>{label}</span><small>↗ {change}</small></div>; }
+
+type AdminTopic = AssignedTopic & { document_count?: number; assignment_count?: number };
+function AdminPanel() {
+  const [authenticated, setAuthenticated] = useState(false); const [topics, setTopics] = useState<AdminTopic[]>([]); const [message, setMessage] = useState("");
+  const [username, setUsername] = useState("admin"); const [password, setPassword] = useState("");
+  const [title, setTitle] = useState(""); const [subject, setSubject] = useState(""); const [description, setDescription] = useState(""); const [difficulty, setDifficulty] = useState<Difficulty>("Standard");
+  const [selected, setSelected] = useState(""); const [studentEmail, setStudentEmail] = useState("");
+  const load = () => fetch("/api/admin/topics").then(async (r) => { if (!r.ok) throw new Error(); return r.json(); }).then((d) => { setAuthenticated(true); setTopics(d.topics ?? []); setSelected((v) => v || d.topics?.[0]?.id || ""); }).catch(() => setAuthenticated(false));
+  useEffect(load, []);
+  async function login(event: React.FormEvent) { event.preventDefault(); const r = await fetch("/api/admin/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) }); const d = await r.json(); if (!r.ok) return setMessage(d.error); setMessage(""); load(); }
+  async function create(event: React.FormEvent) { event.preventDefault(); const r = await fetch("/api/admin/topics", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "create", title, subject, description, difficulty }) }); const d = await r.json(); if (!r.ok) return setMessage(d.error); setTitle(""); setSubject(""); setDescription(""); setMessage("Mock viva created."); load(); }
+  async function assign(event: React.FormEvent) { event.preventDefault(); const r = await fetch("/api/admin/topics", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "assign", topicId: selected, email: studentEmail }) }); const d = await r.json(); if (!r.ok) return setMessage(d.error); setStudentEmail(""); setMessage("Student assigned successfully."); load(); }
+  async function upload(event: ChangeEvent<HTMLInputElement>) { const file = event.target.files?.[0]; if (!file || !selected) return; setMessage("Indexing document…"); const form = new FormData(); form.set("topicId", selected); form.set("file", file); const r = await fetch("/api/admin/topics", { method: "POST", body: form }); const d = await r.json(); setMessage(r.ok ? "Document uploaded and indexed." : d.error); if (r.ok) load(); event.target.value = ""; }
+  if (!authenticated) return <div className="page narrow-page"><div className="page-heading"><div><span className="eyebrow">PROTECTED ADMINISTRATION</span><h1>Admin sign in</h1><p>Manage mock viva topics, documents and student access.</p></div></div><form className="admin-login" onSubmit={login}><label>Username<input value={username} onChange={(e) => setUsername(e.target.value)} /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>{message && <div className="settings-error">{message}</div>}<button className="primary-button">Sign in</button></form></div>;
+  return <div className="page"><div className="page-heading"><div><span className="eyebrow">ADMIN CONTROL CENTRE</span><h1>Mock viva assignments</h1><p>Create a topic, attach its source material, then grant access by student email.</p></div></div>{message && <div className="admin-message">{message}</div>}<div className="admin-grid"><form className="admin-card" onSubmit={create}><h2>Create mock viva</h2><label>Title<input value={title} required onChange={(e) => setTitle(e.target.value)} placeholder="DBMS Semester Viva" /></label><label>Subject<input value={subject} required onChange={(e) => setSubject(e.target.value)} placeholder="Database Systems" /></label><label>Description<textarea value={description} onChange={(e) => setDescription(e.target.value)} /></label><label>Difficulty<select value={difficulty} onChange={(e) => setDifficulty(e.target.value as Difficulty)}><option>Foundation</option><option>Standard</option><option>Challenge</option></select></label><button className="primary-button">Create topic</button></form><section className="admin-card"><h2>Assign & upload</h2><label>Mock viva<select value={selected} onChange={(e) => setSelected(e.target.value)}><option value="">Choose topic</option>{topics.map((t) => <option value={t.id} key={t.id}>{t.title}</option>)}</select></label><form onSubmit={assign}><label>Student email<input type="email" value={studentEmail} required onChange={(e) => setStudentEmail(e.target.value)} placeholder="student@example.com" /></label><button className="primary-button" disabled={!selected}>Assign student</button></form><label className="admin-upload">Topic document<input type="file" accept=".pdf,.doc,.docx,.txt" onChange={upload} disabled={!selected} /></label></section></div><section className="admin-topic-list"><h2>Topics</h2>{topics.length ? topics.map((t) => <button key={t.id} onClick={() => setSelected(t.id)}><div><strong>{t.title}</strong><span>{t.subject} · {t.difficulty}</span></div><span>{t.document_count ?? 0} docs · {t.assignment_count ?? 0} students</span></button>) : <p>No mock vivas created yet.</p>}</section></div>;
+}
 
 function Settings({ documents, addDocuments, documentError }: { documents: DocumentRecord[]; addDocuments: (event: ChangeEvent<HTMLInputElement>) => void; documentError: string }) {
   const [tab, setTab] = useState("syllabus");

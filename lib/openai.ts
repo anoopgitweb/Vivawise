@@ -29,6 +29,14 @@ export async function createVectorStore(userId: string) {
   return String(result.id);
 }
 
+export async function createTopicVectorStore(topicId: string, title: string) {
+  const result = await openAI("/vector_stores", {
+    method: "POST", headers: { "Content-Type": "application/json", "OpenAI-Beta": "assistants=v2" },
+    body: JSON.stringify({ name: `Vivawise: ${title}`.slice(0, 240), metadata: { vivawise_topic: topicId } }),
+  });
+  return String(result.id);
+}
+
 export async function uploadKnowledgeFile(file: File) {
   const body = new FormData();
   body.set("purpose", "assistants");

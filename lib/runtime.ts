@@ -39,6 +39,12 @@ export async function ensureSchema() {
     db.prepare("CREATE TABLE IF NOT EXISTS viva_answers (id TEXT PRIMARY KEY NOT NULL, session_id TEXT NOT NULL, user_id TEXT NOT NULL, question TEXT NOT NULL, answer TEXT NOT NULL, score INTEGER NOT NULL, feedback_json TEXT NOT NULL, created_at INTEGER NOT NULL)"),
     db.prepare("CREATE INDEX IF NOT EXISTS answers_session_idx ON viva_answers (session_id)"),
     db.prepare("CREATE INDEX IF NOT EXISTS answers_user_idx ON viva_answers (user_id)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS mock_viva_topics (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, subject TEXT NOT NULL, description TEXT NOT NULL, difficulty TEXT DEFAULT 'Standard' NOT NULL, vector_store_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS topic_documents (id TEXT PRIMARY KEY NOT NULL, topic_id TEXT NOT NULL, file_name TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, r2_key TEXT NOT NULL, openai_file_id TEXT, status TEXT DEFAULT 'processing' NOT NULL, error_message TEXT, created_at INTEGER NOT NULL)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS topic_documents_topic_idx ON topic_documents (topic_id, created_at)"),
+    db.prepare("CREATE TABLE IF NOT EXISTS topic_assignments (id TEXT PRIMARY KEY NOT NULL, topic_id TEXT NOT NULL, user_id TEXT NOT NULL, assigned_email TEXT NOT NULL, assigned_at INTEGER NOT NULL, UNIQUE(topic_id, user_id))"),
+    db.prepare("CREATE INDEX IF NOT EXISTS topic_assignments_user_idx ON topic_assignments (user_id, assigned_at)"),
   ]);
+  try { await db.prepare("ALTER TABLE viva_sessions ADD COLUMN topic_id TEXT").run(); } catch { /* already migrated */ }
   schemaReady = true;
 }

@@ -13,10 +13,11 @@ export async function requireVivaUser(request: Request): Promise<VivaUser> {
     ? safeDecode(encodedName) ?? email.split("@")[0]
     : email.split("@")[0];
 
-  return { userId: await sha256(email), email, displayName };
+  return { userId: await userIdFromEmail(email), email, displayName };
 }
 
-async function sha256(value: string) {
+export async function userIdFromEmail(value: string) {
+  value = value.trim().toLowerCase();
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
