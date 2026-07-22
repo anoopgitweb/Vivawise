@@ -63,6 +63,12 @@ type AssignedTopic = {
   documentCount: number;
   questionCount: number;
   timeLimitMinutes: number;
+  syllabusModules: SyllabusModule[];
+};
+type SyllabusModule = {
+  category: string;
+  title: string;
+  description: string;
 };
 
 const subjects = [
@@ -129,6 +135,7 @@ export default function VivaApp() {
   const [selectedTopic, setSelectedTopic] = useState<AssignedTopic | null>(
     null,
   );
+  const [selectedSyllabusModule, setSelectedSyllabusModule] = useState("");
 
   useEffect(() => {
     fetch("/api/documents")
@@ -198,6 +205,15 @@ export default function VivaApp() {
       return;
     }
     setSelectedTopic(chosen);
+    const moduleIsValid = chosen.syllabusModules?.some(
+      (module) => module.title === selectedSyllabusModule,
+    );
+    if (chosen.syllabusModules?.length && !moduleIsValid) {
+      setSelectedSyllabusModule("");
+      setSessionOpen(false);
+      setView("practice");
+      return;
+    }
     setView("practice");
     setSessionOpen(true);
     setFeedbackOpen(false);
@@ -319,7 +335,7 @@ export default function VivaApp() {
           <span className="coach-spark">✦</span>
           <strong>AI Coach</strong>
           <p>Your answers are evaluated only against your uploaded syllabus.</p>
-          <button onClick={beginPractice}>Start a quick viva</button>
+          <button onClick={() => beginPractice()}>Start a quick viva</button>
         </div>
         <div className="profile-chip">
           <div className="avatar">AS</div>
@@ -371,6 +387,22 @@ export default function VivaApp() {
             topics={assignedTopics}
             selected={selectedTopic}
             setSelected={setSelectedTopic}
+            selectedModule={selectedSyllabusModule}
+            setSelectedModule={setSelectedSyllabusModule}
+            onModulesDetected={(topicId, modules) => {
+              setAssignedTopics((current) =>
+                current.map((topic) =>
+                  topic.id === topicId
+                    ? { ...topic, syllabusModules: modules }
+                    : topic,
+                ),
+              );
+              setSelectedTopic((current) =>
+                current?.id === topicId
+                  ? { ...current, syllabusModules: modules }
+                  : current,
+              );
+            }}
             onStart={() => beginPractice()}
           />
         )}
@@ -403,6 +435,7 @@ export default function VivaApp() {
               setView("home");
             }}
             topic={selectedTopic!}
+            syllabusModule={selectedSyllabusModule}
           />
         )}
       </section>
@@ -684,13 +717,56 @@ function PracticeSetup({
   topics,
   selected,
   setSelected,
+  selectedModule,
+  setSelectedModule,
+  onModulesDetected,
   onStart,
 }: {
   topics: AssignedTopic[];
   selected: AssignedTopic | null;
   setSelected: (topic: AssignedTopic) => void;
+  selectedModule: string;
+  setSelectedModule: (module: string) => void;
+  onModulesDetected: (topicId: string, modules: SyllabusModule[]) => void;
   onStart: () => void;
 }) {
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState("");
+
+  useEffect(() => {
+    if (!selected || selected.syllabusModules?.length || !selected.documentCount)
+      return;
+    let active = true;
+    setScanning(true);
+    setScanError("");
+    fetch("/api/viva", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "modules", topicId: selected.id }),
+    })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok)
+          throw new Error(data.error || "Could not analyze the syllabus.");
+        return data;
+      })
+      .then((data) => {
+        if (active) onModulesDetected(selected.id, data.modules || []);
+      })
+      .catch((error) => {
+        if (active)
+          setScanError(
+            error instanceof Error ? error.message : "Syllabus analysis failed.",
+          );
+      })
+      .finally(() => {
+        if (active) setScanning(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selected?.id, selected?.documentCount]);
+
   return (
     <div className="page narrow-page">
       <div className="page-heading">
@@ -717,7 +793,10 @@ function PracticeSetup({
                 className={
                   selected?.id === topic.id ? "choice selected" : "choice"
                 }
-                onClick={() => setSelected(topic)}
+                onClick={() => {
+                  setSelected(topic);
+                  setSelectedModule("");
+                }}
                 key={topic.id}
               >
                 <span className="subject-icon mint">
@@ -742,6 +821,54 @@ function PracticeSetup({
             </span>
           </div>
         )}
+        {selected && (
+          <div className="module-picker">
+            <div className="setup-step">
+              <span>2</span>
+              <div>
+                <h3>Choose a syllabus module</h3>
+                <p>Questions will be restricted to this selected section.</p>
+              </div>
+            </div>
+            {scanning ? (
+              <p className="module-scan-status">Scanning and categorizing the attached documents…</p>
+            ) : scanError ? (
+              <div className="settings-error">{scanError}</div>
+            ) : selected.syllabusModules?.length ? (
+              <label>
+                Syllabus module
+                <select
+                  value={selectedModule}
+                  onChange={(event) => setSelectedModule(event.target.value)}
+                >
+                  <option value="">Choose a module</option>
+                  {Array.from(
+                    new Set(selected.syllabusModules.map((module) => module.category)),
+                  ).map((category) => (
+                    <optgroup label={category} key={category}>
+                      {selected.syllabusModules
+                        .filter((module) => module.category === category)
+                        .map((module) => (
+                          <option value={module.title} key={`${category}-${module.title}`}>
+                            {module.title}
+                          </option>
+                        ))}
+                    </optgroup>
+                  ))}
+                </select>
+                {selectedModule && (
+                  <small>
+                    {selected.syllabusModules.find(
+                      (module) => module.title === selectedModule,
+                    )?.description}
+                  </small>
+                )}
+              </label>
+            ) : (
+              <p className="module-scan-status">No categorized modules are available yet.</p>
+            )}
+          </div>
+        )}
         <div className="session-summary">
           <div>
             <span>{selected?.questionCount ?? "—"}</span>
@@ -757,7 +884,11 @@ function PracticeSetup({
           </div>
           <button
             className="primary-button"
-            disabled={!selected}
+            disabled={
+              !selected ||
+              scanning ||
+              Boolean(selected.syllabusModules?.length && !selectedModule)
+            }
             onClick={onStart}
           >
             Begin viva <span>→</span>
@@ -770,6 +901,7 @@ function PracticeSetup({
 
 function VivaSession(props: {
   topic: AssignedTopic;
+  syllabusModule: string;
   answer: string;
   setAnswer: (value: string) => void;
   question: number;
@@ -804,7 +936,11 @@ function VivaSession(props: {
     fetch("/api/viva", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "start", topicId: props.topic.id }),
+      body: JSON.stringify({
+        action: "start",
+        topicId: props.topic.id,
+        syllabusModule: props.syllabusModule,
+      }),
     })
       .then(async (response) => {
         const data = await response.json();

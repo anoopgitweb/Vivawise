@@ -53,6 +53,37 @@ const questionSchema = {
   required: ["question", "hint", "topic", "sourceBasis"],
 };
 
+const syllabusModuleSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    categories: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          category: { type: "string" },
+          modules: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                title: { type: "string" },
+                description: { type: "string" },
+              },
+              required: ["title", "description"],
+            },
+          },
+        },
+        required: ["category", "modules"],
+      },
+    },
+  },
+  required: ["categories"],
+};
+
 const feedbackSchema = {
   type: "object",
   additionalProperties: false,
@@ -132,8 +163,57 @@ export async function POST(request: Request) {
       answer?: string;
       questionNumber?: number;
       skipped?: boolean;
+      syllabusModule?: string;
     };
     const sb = supabaseAdmin();
+
+    if (body.action === "modules") {
+      if (!body.topicId)
+        return Response.json({ error: "Choose an assigned viva." }, { status: 400 });
+      const { data: assignment } = await sb
+        .from("test_assignments")
+        .select("tests(id,name,openai_vector_store_id,syllabus_modules)")
+        .eq("test_id", body.topicId)
+        .eq("user_id", user.userId)
+        .single();
+      const test = (assignment as any)?.tests as any;
+      if (!test)
+        return Response.json({ error: "This viva is not assigned to you." }, { status: 403 });
+      if (Array.isArray(test.syllabus_modules) && test.syllabus_modules.length)
+        return Response.json({ modules: test.syllabus_modules, cached: true });
+      if (!test.openai_vector_store_id)
+        return Response.json(
+          { error: "The administrator must attach and index a document first." },
+          { status: 409 },
+        );
+      const extracted = await createVivaResponse(
+        `Analyze all documents attached to the '${test.name}' viva. Identify the actual examinable syllabus units, chapters, modules, or major topic groups. Merge duplicates across documents. Return a concise, logically ordered categorization. Do not invent content that is not supported by the documents.`,
+        "syllabus_modules",
+        syllabusModuleSchema,
+        test.openai_vector_store_id,
+      );
+      const categories = Array.isArray(extracted.categories)
+        ? extracted.categories
+        : [];
+      const modules = categories.flatMap((group: any) =>
+        (Array.isArray(group.modules) ? group.modules : []).map((module: any) => ({
+          category: String(group.category || "Syllabus"),
+          title: String(module.title || "").trim(),
+          description: String(module.description || "").trim(),
+        })),
+      ).filter((module: any) => module.title);
+      if (!modules.length)
+        return Response.json(
+          { error: "No clear syllabus modules could be identified in the attached documents." },
+          { status: 422 },
+        );
+      const { error } = await sb
+        .from("tests")
+        .update({ syllabus_modules: modules, updated_at: new Date().toISOString() })
+        .eq("id", test.id);
+      if (error) throw error;
+      return Response.json({ modules, cached: false });
+    }
 
     if (body.action === "start") {
       if (!body.topicId)
@@ -156,6 +236,23 @@ export async function POST(request: Request) {
       const totalQuestions = Number(topic.question_count) || 10;
       const timeLimitMinutes = Number(topic.time_limit_minutes) || 20;
       const attemptsAllowed = Number(topic.attempts_allowed) || 1;
+      const syllabusModules = Array.isArray(topic.syllabus_modules)
+        ? topic.syllabus_modules
+        : [];
+      const selectedModule = body.syllabusModule?.trim() || "";
+      if (syllabusModules.length && !selectedModule)
+        return Response.json(
+          { error: "Choose a syllabus module before starting the viva." },
+          { status: 400 },
+        );
+      if (
+        selectedModule &&
+        !syllabusModules.some((module: any) => module.title === selectedModule)
+      )
+        return Response.json(
+          { error: "The selected syllabus module is not available." },
+          { status: 400 },
+        );
       const now = Date.now();
       if (
         topic.available_from &&
@@ -203,11 +300,18 @@ export async function POST(request: Request) {
         );
       const { data: attempt, error } = await sb
         .from("test_attempts")
-        .insert({ test_id: topic.id, user_id: user.userId })
+        .insert({
+          test_id: topic.id,
+          user_id: user.userId,
+          selected_module: selectedModule || null,
+        })
         .select("id")
         .single();
       if (error) throw error;
-      const prompt = `You are Vivawise, a rigorous university viva examiner. Generate question 1 of ${totalQuestions} for '${topic.name}'. ${topic.instructions ? `Instructions: ${topic.instructions}` : ""} ${topic.openai_vector_store_id ? "You MUST use file search. Ask a question supported by the attached test documents only. Do not use outside knowledge. If the documents do not support a suitable question, state that the source material is insufficient." : "Use foundational knowledge only because this test permits it."}`;
+      const moduleInstruction = selectedModule
+        ? `The student selected the syllabus module '${selectedModule}'. Every question in this attempt must be specifically about that module.`
+        : "";
+      const prompt = `You are Vivawise, a rigorous university viva examiner. Generate question 1 of ${totalQuestions} for '${topic.name}'. ${moduleInstruction} ${topic.instructions ? `Instructions: ${topic.instructions}` : ""} ${topic.openai_vector_store_id ? "You MUST use file search. Ask a question supported by the attached test documents only. Do not use outside knowledge. If the documents do not support a suitable question, state that the source material is insufficient." : "Use foundational knowledge only because this test permits it."}`;
       const result = demoMode
         ? {
             question: demoQuestions[0],
@@ -245,7 +349,7 @@ export async function POST(request: Request) {
         );
       const { data: owned } = await sb
         .from("test_attempts")
-        .select("id,started_at,tests(*)")
+        .select("id,started_at,selected_module,tests(*)")
         .eq("id", body.sessionId)
         .eq("user_id", user.userId)
         .single();
@@ -302,7 +406,8 @@ export async function POST(request: Request) {
           ...attemptResult,
         });
       }
-      const prompt = `You are Vivawise, a fair university viva examiner. ${test.instructions ? `Examiner instructions: ${test.instructions}` : ""} ${vectorStoreId ? "You MUST use file search and evaluate only against the attached test documents. Do not introduce outside facts." : "Evaluate using foundational knowledge."} Question: ${body.question}. Student answer: ${body.answer}. Score 0 to 10. Then generate question ${(answerCount || 0) + 2} of ${totalQuestions}, also grounded only in the attached documents and following the examiner instructions.`;
+      const selectedModule = String((owned as any).selected_module || "");
+      const prompt = `You are Vivawise, a fair university viva examiner. ${selectedModule ? `This entire attempt is restricted to the student-selected syllabus module '${selectedModule}'.` : ""} ${test.instructions ? `Examiner instructions: ${test.instructions}` : ""} ${vectorStoreId ? "You MUST use file search and evaluate only against the attached test documents. Do not introduce outside facts." : "Evaluate using foundational knowledge."} Question: ${body.question}. Student answer: ${body.answer}. Score 0 to 10. Then generate question ${(answerCount || 0) + 2} of ${totalQuestions}, also grounded only in the attached documents, restricted to the selected syllabus module, and following the examiner instructions.`;
       const demoMode = !getVivaEnv().OPENAI_API_KEY;
       const result = demoMode
         ? demoFeedback(body.answer, (answerCount || 0) + 1, totalQuestions)

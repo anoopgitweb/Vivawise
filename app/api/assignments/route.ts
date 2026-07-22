@@ -5,7 +5,7 @@ export async function GET(request: Request) {
     const { data, error } = await supabaseAdmin()
       .from("test_assignments")
       .select(
-        "tests(id,name,subject,description,difficulty,question_count,time_limit_minutes,test_documents(count))",
+        "tests(id,name,subject,description,difficulty,question_count,time_limit_minutes,syllabus_modules,test_documents(count))",
       )
       .eq("user_id", user.id)
       .order("assigned_at", { ascending: false });
@@ -22,6 +22,9 @@ export async function GET(request: Request) {
         documentCount: t.test_documents?.[0]?.count || 0,
         questionCount: Number(t.question_count) || 10,
         timeLimitMinutes: Number(t.time_limit_minutes) || 20,
+        syllabusModules: Array.isArray(t.syllabus_modules)
+          ? t.syllabus_modules
+          : [],
       }));
     return Response.json({
       user: { email: user.email, displayName: user.fullName },

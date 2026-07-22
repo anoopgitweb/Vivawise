@@ -262,6 +262,10 @@ export async function POST(request: Request) {
           })
           .eq("id", document.id);
         if (updateError) throw new Error(updateError.message);
+        await sb
+          .from("tests")
+          .update({ syllabus_modules: [] })
+          .eq("id", test.id);
         return Response.json({ ok: true, status: "ready" });
       } catch (error) {
         const message =
@@ -439,6 +443,10 @@ export async function POST(request: Request) {
             openai_file_id: openaiFileId,
           })
           .eq("id", document.id);
+        await sb
+          .from("tests")
+          .update({ syllabus_modules: [] })
+          .eq("id", test.id);
         return Response.json({ ok: true });
       } catch (error) {
         const message =
@@ -484,6 +492,10 @@ export async function POST(request: Request) {
         .delete()
         .eq("id", document.id);
       if (deleteError) throw deleteError;
+      await sb
+        .from("tests")
+        .update({ syllabus_modules: [] })
+        .eq("id", document.test_id);
       return Response.json({ ok: true });
     }
     return Response.json({ error: "Unknown action." }, { status: 400 });
