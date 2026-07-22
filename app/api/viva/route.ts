@@ -298,7 +298,7 @@ export async function POST(request: Request) {
           },
           { status: 409 },
         );
-      const { data: attempt, error } = await sb
+      let { data: attempt, error } = await sb
         .from("test_attempts")
         .insert({
           test_id: topic.id,
@@ -307,6 +307,15 @@ export async function POST(request: Request) {
         })
         .select("id")
         .single();
+      if (error && error.message.includes("selected_module") && !selectedModule) {
+        const fallback = await sb
+          .from("test_attempts")
+          .insert({ test_id: topic.id, user_id: user.userId })
+          .select("id")
+          .single();
+        attempt = fallback.data;
+        error = fallback.error;
+      }
       if (error) throw error;
       const moduleInstruction = selectedModule
         ? `The student selected the syllabus module '${selectedModule}'. Every question in this attempt must be specifically about that module.`
@@ -347,12 +356,22 @@ export async function POST(request: Request) {
           { error: "Session, question and answer are required." },
           { status: 400 },
         );
-      const { data: owned } = await sb
+      let { data: owned, error: ownedError } = await sb
         .from("test_attempts")
         .select("id,started_at,selected_module,tests(*)")
         .eq("id", body.sessionId)
         .eq("user_id", user.userId)
         .single();
+      if (ownedError && ownedError.message.includes("selected_module")) {
+        const fallback = await sb
+          .from("test_attempts")
+          .select("id,started_at,tests(*)")
+          .eq("id", body.sessionId)
+          .eq("user_id", user.userId)
+          .single();
+        owned = fallback.data as typeof owned;
+        ownedError = fallback.error;
+      }
       if (!owned)
         return Response.json({ error: "Session not found." }, { status: 404 });
       const test = (owned as any).tests;

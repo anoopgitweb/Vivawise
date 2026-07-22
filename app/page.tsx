@@ -151,6 +151,7 @@ export default function VivaApp() {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [documentError, setDocumentError] = useState("");
   const [assignedTopics, setAssignedTopics] = useState<AssignedTopic[]>([]);
+  const [assignmentsError, setAssignmentsError] = useState("");
   const [selectedTopic, setSelectedTopic] = useState<AssignedTopic | null>(
     null,
   );
@@ -210,12 +211,22 @@ export default function VivaApp() {
 
   useEffect(() => {
     fetch("/api/assignments")
-      .then((r) => r.json())
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok)
+          throw new Error(data.error || "Could not load assigned Vivas.");
+        return data;
+      })
       .then((data) => {
+        setAssignmentsError("");
         setAssignedTopics(data.topics ?? []);
         setSelectedTopic((current) => current ?? data.topics?.[0] ?? null);
       })
-      .catch(() => {});
+      .catch((error) =>
+        setAssignmentsError(
+          error instanceof Error ? error.message : "Could not load assigned Vivas.",
+        ),
+      );
   }, [view]);
 
   useEffect(() => {
@@ -427,6 +438,7 @@ export default function VivaApp() {
         {view === "practice" && !sessionOpen && (
           <PracticeSetup
             topics={assignedTopics}
+            assignmentsError={assignmentsError}
             selected={selectedTopic}
             setSelected={setSelectedTopic}
             selectedModule={selectedSyllabusModule}
@@ -827,6 +839,7 @@ function Dashboard({
 
 function PracticeSetup({
   topics,
+  assignmentsError,
   selected,
   setSelected,
   selectedModule,
@@ -835,6 +848,7 @@ function PracticeSetup({
   onStart,
 }: {
   topics: AssignedTopic[];
+  assignmentsError: string;
   selected: AssignedTopic | null;
   setSelected: (topic: AssignedTopic) => void;
   selectedModule: string;
@@ -898,6 +912,9 @@ function PracticeSetup({
             <p>Only topics assigned to your signed-in email appear here.</p>
           </div>
         </div>
+        {assignmentsError && (
+          <div className="settings-error">{assignmentsError}</div>
+        )}
         {topics.length ? (
           <div className="choice-grid">
             {topics.map((topic) => (
