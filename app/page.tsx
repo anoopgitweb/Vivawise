@@ -1749,6 +1749,7 @@ function AdminSummaryPanel({
 }
 function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
   const [authenticated, setAuthenticated] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [topics, setTopics] = useState<AdminTopic[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [message, setMessage] = useState("");
@@ -1790,16 +1791,32 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
   const load = () =>
     fetch("/api/admin/topics")
       .then(async (r) => {
-        if (!r.ok) throw new Error();
-        return r.json();
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          const error = new Error(
+            data.error || `Could not load admin data (${r.status}).`,
+          ) as Error & { status?: number };
+          error.status = r.status;
+          throw error;
+        }
+        return data;
       })
       .then((d) => {
         setAuthenticated(true);
+        setLoadError("");
         setTopics(d.topics ?? []);
         setUsers(d.users ?? []);
         setSelected((v) => v || d.topics?.[0]?.id || "");
       })
-      .catch(() => setAuthenticated(false));
+      .catch((error: Error & { status?: number }) => {
+        if (error.status === 401 || error.status === 403) {
+          setAuthenticated(false);
+          setLoadError("");
+          return;
+        }
+        setAuthenticated(true);
+        setLoadError(error.message || "Could not load admin data.");
+      });
   useEffect(() => {
     void load();
   }, []);
@@ -2068,6 +2085,18 @@ function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
       <div className="page narrow-page">
         <div className="settings-error">
           Your Supabase account does not have administrator access.
+        </div>
+      </div>
+    );
+  if (loadError)
+    return (
+      <div className="page narrow-page">
+        <div className="settings-error">
+          <strong>Admin data could not be loaded.</strong>
+          <span>{loadError}</span>
+          <button className="primary-button" onClick={load}>
+            Try again
+          </button>
         </div>
       </div>
     );

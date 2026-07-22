@@ -13,7 +13,7 @@ async function fetchAllAttempts(sb: ReturnType<typeof supabaseAdmin>) {
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await sb
       .from("test_attempts")
-      .select("id,test_id,user_id,status,score,started_at,completed_at,selected_module")
+      .select("id,test_id,user_id,status,score,started_at,completed_at")
       .order("started_at", { ascending: false })
       .range(from, from + pageSize - 1);
     if (error) return { data: null, error };
