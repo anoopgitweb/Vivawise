@@ -2295,6 +2295,14 @@ button {
   color: #a64f43;
   overflow-wrap: anywhere;
 }
+.create-document-list > span button {
+  border: 0;
+  background: transparent;
+  color: #a64f43;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 700;
+}
 .assigned-users > span {
   position: relative;
   padding-right: 28px;

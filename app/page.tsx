@@ -1411,6 +1411,8 @@ function AdminPanel({ mode }: { mode: "create" | "existing" }) {
   const [skippingAllowed, setSkippingAllowed] = useState(false);
   const [answerMode, setAnswerMode] = useState("both");
   const [instructions, setInstructions] = useState("");
+  const [createFiles, setCreateFiles] = useState<File[]>([]);
+  const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState("");
   const [selectedUser, setSelectedUser] = useState("");
   const [savedInstructions, setSavedInstructions] = useState("");
@@ -1441,6 +1443,8 @@ function AdminPanel({ mode }: { mode: "create" | "existing" }) {
   }, []);
   async function create(event: React.FormEvent) {
     event.preventDefault();
+    setCreating(true);
+    setMessage("Creating viva…");
     const r = await fetch("/api/admin/topics", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1467,15 +1471,37 @@ function AdminPanel({ mode }: { mode: "create" | "existing" }) {
       }),
     });
     const d = await r.json();
-    if (!r.ok) return setMessage(d.error);
+    if (!r.ok) {
+      setCreating(false);
+      return setMessage(d.error);
+    }
+    let ready = 0;
+    let pending = 0;
+    for (const file of createFiles) {
+      setMessage(`Uploading ${file.name}…`);
+      const form = new FormData();
+      form.set("topicId", d.id);
+      form.set("file", file);
+      const uploadResponse = await fetch("/api/admin/topics", {
+        method: "POST",
+        body: form,
+      });
+      const uploadData = await uploadResponse.json();
+      if (uploadResponse.ok && uploadData.status === "ready") ready += 1;
+      else pending += 1;
+    }
     setTitle("");
     setSubject("");
     setDescription("");
     setInstructions("");
+    setCreateFiles([]);
+    setCreating(false);
     setMessage(
-      "Mock viva created. Attach and index a document before assigning it for practice.",
+      createFiles.length
+        ? `Viva created with ${ready} ready document${ready === 1 ? "" : "s"}${pending ? ` and ${pending} requiring retry` : ""}.`
+        : "Viva created. Add a supporting document from Existing Vivas before assigning students.",
     );
-    load();
+    await load();
   }
   async function assign(event: React.FormEvent) {
     event.preventDefault();
@@ -1771,11 +1797,47 @@ function AdminPanel({ mode }: { mode: "create" | "existing" }) {
                 placeholder="Instructions shown during this viva"
               />
             </label>
+            <label className="admin-upload">
+              Supporting documents
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,.txt"
+                multiple
+                onChange={(event) =>
+                  setCreateFiles(Array.from(event.target.files || []))
+                }
+              />
+            </label>
+            {createFiles.length > 0 && (
+              <div className="module-documents create-document-list">
+                <strong>
+                  {createFiles.length} document
+                  {createFiles.length === 1 ? "" : "s"} selected
+                </strong>
+                {createFiles.map((file) => (
+                  <span key={`${file.name}-${file.size}`}>
+                    <b>{file.name}</b>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCreateFiles((files) =>
+                          files.filter((item) => item !== file),
+                        )
+                      }
+                    >
+                      Remove
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="grounding-lock">
               Document-only questions are enforced. Students cannot start until
               a document is indexed.
             </div>
-            <button className="primary-button">Create topic</button>
+            <button className="primary-button" disabled={creating}>
+              {creating ? "Creating & indexing…" : "Create Viva"}
+            </button>
           </form>
         )}
         {mode === "existing" && (
