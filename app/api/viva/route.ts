@@ -265,7 +265,7 @@ export async function POST(request: Request) {
           demo: !getVivaEnv().OPENAI_API_KEY,
         });
       }
-      const prompt = `You are Vivawise, a fair university viva examiner. ${vectorStoreId ? "You MUST use file search and evaluate only against the attached test documents. Do not introduce outside facts." : "Evaluate using foundational knowledge."} Question: ${body.question}. Student answer: ${body.answer}. Score 0 to 10. Then generate question ${(answerCount || 0) + 2} of ${totalQuestions}, also grounded only in the attached documents.`;
+      const prompt = `You are Vivawise, a fair university viva examiner. ${test.instructions ? `Examiner instructions: ${test.instructions}` : ""} ${vectorStoreId ? "You MUST use file search and evaluate only against the attached test documents. Do not introduce outside facts." : "Evaluate using foundational knowledge."} Question: ${body.question}. Student answer: ${body.answer}. Score 0 to 10. Then generate question ${(answerCount || 0) + 2} of ${totalQuestions}, also grounded only in the attached documents and following the examiner instructions.`;
       const demoMode = !getVivaEnv().OPENAI_API_KEY;
       const result = demoMode
         ? demoFeedback(body.answer, (answerCount || 0) + 1, totalQuestions)

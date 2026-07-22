@@ -1151,6 +1151,7 @@ type AdminAttempt = {
   user?: AdminUser;
 };
 type AdminTopic = AssignedTopic & {
+  instructions?: string;
   document_count?: number;
   assignment_count?: number;
   assignments?: AdminAssignment[];
@@ -1178,6 +1179,7 @@ function AdminPanel() {
   const [instructions, setInstructions] = useState("");
   const [selected, setSelected] = useState("");
   const [selectedUser, setSelectedUser] = useState("");
+  const [savedInstructions, setSavedInstructions] = useState("");
   const load = () =>
     fetch("/api/admin/topics")
       .then(async (r) => {
@@ -1259,6 +1261,28 @@ function AdminPanel() {
     setMessage(r.ok ? "Document uploaded and indexed." : d.error);
     if (r.ok) load();
     event.target.value = "";
+  }
+  useEffect(() => {
+    setSavedInstructions(
+      topics.find((topic) => topic.id === selected)?.instructions || "",
+    );
+  }, [selected, topics]);
+  async function updateInstructions() {
+    if (!selected) return;
+    const response = await fetch("/api/admin/topics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "update_instructions",
+        topicId: selected,
+        instructions: savedInstructions,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok)
+      return setMessage(data.error || "Could not save instructions.");
+    setMessage("Examiner instructions updated.");
+    load();
   }
   if (!authenticated)
     return (
@@ -1484,6 +1508,29 @@ function AdminPanel() {
               disabled={!selected}
             />
           </label>
+          <div className="prompt-editor">
+            <label>
+              Examiner instructions / Prompt
+              <textarea
+                value={savedInstructions}
+                onChange={(e) => setSavedInstructions(e.target.value)}
+                disabled={!selected}
+                placeholder="Example: Ask only from Chapters 2–4. Focus on definitions, comparisons and practical examples. Avoid historical questions."
+              />
+            </label>
+            <small>
+              These instructions guide question selection, but questions remain
+              restricted to this test&apos;s attached documents.
+            </small>
+            <button
+              type="button"
+              className="ghost-button"
+              disabled={!selected}
+              onClick={updateInstructions}
+            >
+              Save instructions
+            </button>
+          </div>
         </section>
       </div>
       <section className="admin-topic-list">

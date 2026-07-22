@@ -106,20 +106,18 @@ export async function POST(request: Request) {
         errorMessage =
           error instanceof Error ? error.message : "OpenAI indexing pending";
       }
-      const { error } = await sb
-        .from("test_documents")
-        .insert({
-          id,
-          test_id: testId,
-          file_name: file.name,
-          storage_path: path,
-          mime_type: file.type || "application/octet-stream",
-          size_bytes: file.size,
-          openai_file_id: openaiFileId,
-          status,
-          error_message: errorMessage,
-          uploaded_by: user.id,
-        });
+      const { error } = await sb.from("test_documents").insert({
+        id,
+        test_id: testId,
+        file_name: file.name,
+        storage_path: path,
+        mime_type: file.type || "application/octet-stream",
+        size_bytes: file.size,
+        openai_file_id: openaiFileId,
+        status,
+        error_message: errorMessage,
+        uploaded_by: user.id,
+      });
       if (error) throw error;
       return Response.json({ ok: true, status });
     }
@@ -206,6 +204,19 @@ export async function POST(request: Request) {
           { test_id: body.topicId, user_id: student.id, assigned_by: user.id },
           { onConflict: "test_id,user_id" },
         );
+      if (error) throw error;
+      return Response.json({ ok: true });
+    }
+    if (body.action === "update_instructions") {
+      if (!body.topicId)
+        return Response.json({ error: "Choose a test." }, { status: 400 });
+      const { error } = await sb
+        .from("tests")
+        .update({
+          instructions: body.instructions?.trim() || "",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", body.topicId);
       if (error) throw error;
       return Response.json({ ok: true });
     }
