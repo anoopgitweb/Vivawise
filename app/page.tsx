@@ -2,7 +2,15 @@
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 
-type View = "home" | "practice" | "progress" | "settings" | "admin";
+type View =
+  | "home"
+  | "practice"
+  | "progress"
+  | "settings"
+  | "admin"
+  | "admin_users"
+  | "admin_results"
+  | "admin_usage";
 type Difficulty = "Foundation" | "Standard" | "Challenge";
 type DocumentRecord = {
   id?: string;
@@ -75,7 +83,10 @@ const navItems: { id: View; label: string; icon: string }[] = [
   { id: "practice", label: "Practice", icon: "◉" },
   { id: "progress", label: "Progress", icon: "↗" },
   { id: "settings", label: "Settings", icon: "⚙" },
-  { id: "admin", label: "Admin", icon: "A" },
+  { id: "admin", label: "Viva Modules", icon: "V" },
+  { id: "admin_users", label: "Users", icon: "U" },
+  { id: "admin_results", label: "Results", icon: "R" },
+  { id: "admin_usage", label: "Usage", icon: "↗" },
 ];
 
 export default function VivaApp() {
@@ -265,7 +276,9 @@ export default function VivaApp() {
         <nav className="main-nav" aria-label="Main navigation">
           {navItems
             .filter((item) =>
-              role === "admin" ? item.id === "admin" : item.id !== "admin",
+              role === "admin"
+                ? item.id.startsWith("admin")
+                : !item.id.startsWith("admin"),
             )
             .map((item) => (
               <button
@@ -349,6 +362,9 @@ export default function VivaApp() {
           />
         )}
         {view === "admin" && <AdminPanel />}
+        {view === "admin_users" && <AdminSummaryPanel section="users" />}
+        {view === "admin_results" && <AdminSummaryPanel section="results" />}
+        {view === "admin_usage" && <AdminSummaryPanel section="usage" />}
         {view === "practice" && sessionOpen && (
           <VivaSession
             answer={answer}
@@ -371,7 +387,9 @@ export default function VivaApp() {
       <nav className="mobile-nav" aria-label="Mobile navigation">
         {navItems
           .filter((item) =>
-            role === "admin" ? item.id === "admin" : item.id !== "admin",
+            role === "admin"
+              ? item.id.startsWith("admin")
+              : !item.id.startsWith("admin"),
           )
           .map((item) => (
             <button
@@ -1169,6 +1187,207 @@ type AdminTopic = AssignedTopic & {
   attempts_allowed?: number;
   pass_mark?: number;
 };
+function AdminSummaryPanel({
+  section,
+}: {
+  section: "users" | "results" | "usage";
+}) {
+  const [topics, setTopics] = useState<AdminTopic[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    fetch("/api/admin/topics")
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok)
+          throw new Error(data.error || "Could not load admin data");
+        return data;
+      })
+      .then((data) => {
+        setTopics(data.topics || []);
+        setUsers(data.users || []);
+      })
+      .catch((reason) =>
+        setError(
+          reason instanceof Error
+            ? reason.message
+            : "Could not load admin data",
+        ),
+      );
+  }, []);
+  const attempts = topics.flatMap((topic) =>
+    (topic.attempts || []).map((attempt) => ({
+      ...attempt,
+      test: topic.title,
+    })),
+  );
+  const completed = attempts.filter(
+    (attempt) => attempt.status === "completed",
+  );
+  const documents = topics.reduce(
+    (sum, topic) => sum + (topic.document_count || 0),
+    0,
+  );
+  const assignments = topics.reduce(
+    (sum, topic) => sum + (topic.assignment_count || 0),
+    0,
+  );
+  if (error)
+    return (
+      <div className="page">
+        <div className="settings-error">{error}</div>
+      </div>
+    );
+  if (section === "users")
+    return (
+      <div className="page">
+        <div className="page-heading">
+          <div>
+            <span className="eyebrow">ADMIN · USERS</span>
+            <h1>Registered students</h1>
+            <p>
+              See each student and the Viva Modules currently assigned to them.
+            </p>
+          </div>
+        </div>
+        <div className="admin-table">
+          <div className="admin-table-head">
+            <span>STUDENT</span>
+            <span>EMAIL</span>
+            <span>ASSIGNED MODULES</span>
+          </div>
+          {users.map((user) => {
+            const assigned = topics.filter((topic) =>
+              topic.assignments?.some(
+                (assignment) => assignment.user_id === user.id,
+              ),
+            );
+            return (
+              <div className="admin-table-row" key={user.id}>
+                <strong>{user.full_name || "Student"}</strong>
+                <span>{user.email}</span>
+                <span>
+                  {assigned.length
+                    ? assigned.map((topic) => topic.title).join(", ")
+                    : "None"}
+                </span>
+              </div>
+            );
+          })}
+          {!users.length && (
+            <div className="empty-documents">
+              No student accounts registered yet.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  if (section === "results")
+    return (
+      <div className="page">
+        <div className="page-heading">
+          <div>
+            <span className="eyebrow">ADMIN · RESULTS</span>
+            <h1>Viva results</h1>
+            <p>Review all attempts across students and modules.</p>
+          </div>
+        </div>
+        <div className="admin-table">
+          <div className="admin-table-head results">
+            <span>STUDENT</span>
+            <span>MODULE</span>
+            <span>STATUS</span>
+            <span>SCORE</span>
+            <span>DATE</span>
+          </div>
+          {attempts.map((attempt) => (
+            <div className="admin-table-row results" key={attempt.id}>
+              <strong>
+                {attempt.user?.full_name || attempt.user?.email || "Student"}
+              </strong>
+              <span>{attempt.test}</span>
+              <span>{attempt.status}</span>
+              <span>
+                {attempt.status === "completed"
+                  ? `${Math.round(Number(attempt.score || 0))}%`
+                  : "—"}
+              </span>
+              <span>
+                {new Date(
+                  attempt.completed_at || attempt.started_at,
+                ).toLocaleString()}
+              </span>
+            </div>
+          ))}
+          {!attempts.length && (
+            <div className="empty-documents">No attempts recorded yet.</div>
+          )}
+        </div>
+      </div>
+    );
+  return (
+    <div className="page">
+      <div className="page-heading">
+        <div>
+          <span className="eyebrow">ADMIN · USAGE</span>
+          <h1>Application usage</h1>
+          <p>
+            Operational activity stored in Supabase. Exact OpenAI token cost
+            tracking will be added separately.
+          </p>
+        </div>
+      </div>
+      <div className="metric-grid">
+        <Metric
+          value={String(users.length)}
+          label="Registered students"
+          change="current total"
+        />
+        <Metric
+          value={String(topics.length)}
+          label="Viva modules"
+          change="current total"
+        />
+        <Metric
+          value={String(assignments)}
+          label="Assignments"
+          change="student access grants"
+        />
+        <Metric
+          value={String(documents)}
+          label="Documents"
+          change="supporting files"
+        />
+      </div>
+      <div className="metric-grid usage-second">
+        <Metric
+          value={String(attempts.length)}
+          label="Attempts started"
+          change="all modules"
+        />
+        <Metric
+          value={String(completed.length)}
+          label="Attempts completed"
+          change="saved results"
+        />
+        <Metric
+          value={
+            completed.length
+              ? `${Math.round(completed.reduce((sum, item) => sum + Number(item.score || 0), 0) / completed.length)}%`
+              : "—"
+          }
+          label="Average score"
+          change="completed attempts"
+        />
+        <Metric
+          value="Pending"
+          label="OpenAI cost"
+          change="token logging required"
+        />
+      </div>
+    </div>
+  );
+}
 function AdminPanel() {
   const [authenticated, setAuthenticated] = useState(true);
   const [topics, setTopics] = useState<AdminTopic[]>([]);
