@@ -1,9 +1,16 @@
 "use client";
 
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 
 type View = "home" | "practice" | "progress" | "settings";
 type Difficulty = "Foundation" | "Standard" | "Challenge";
+type DocumentRecord = { id?: string; name: string; size: string; status: string; date: string; error?: string };
+type VivaFeedback = {
+  score: number; maxScore: number; verdict: string; summary: string;
+  correctPoints: string[]; missingPoints: string[]; incorrectClaims: string[];
+  conceptScore: number; clarityScore: number; completenessScore: number; modelAnswer: string;
+  nextQuestion: string; nextHint: string; nextTopic: string; sourceBasis: string;
+};
 
 const subjects = [
   { name: "Data Structures", unit: "Unit 3", mastery: 74, color: "mint", due: "12 topics" },
@@ -32,10 +39,17 @@ export default function VivaApp() {
   const [difficulty, setDifficulty] = useState<Difficulty>("Standard");
   const [question, setQuestion] = useState(3);
   const [recording, setRecording] = useState(false);
-  const [documents, setDocuments] = useState([
-    { name: "B.Tech CSE Semester IV Syllabus.pdf", size: "2.4 MB", status: "Ready", date: "Updated today" },
-    { name: "DBMS Reference Notes.pdf", size: "5.8 MB", status: "Ready", date: "Updated 2 days ago" },
-  ]);
+  const [documents, setDocuments] = useState<DocumentRecord[]>([]);
+  const [documentError, setDocumentError] = useState("");
+
+  useEffect(() => {
+    fetch("/api/documents").then(async (response) => {
+      if (!response.ok) throw new Error((await response.json()).error || "Could not load documents");
+      return response.json();
+    }).then((data) => setDocuments((data.documents ?? []).map((doc: { id: string; fileName: string; sizeBytes: number; status: string; createdAt: number; errorMessage?: string }) => ({
+      id: doc.id, name: doc.fileName, size: formatBytes(doc.sizeBytes), status: titleCase(doc.status), date: formatDate(doc.createdAt), error: doc.errorMessage,
+    })))).catch(() => { /* Local bindings are unavailable until configured; upload will show the actionable error. */ });
+  }, []);
 
   function beginPractice() {
     setView("practice");
@@ -56,9 +70,10 @@ export default function VivaApp() {
     setFeedbackOpen(false);
   }
 
-  function addDocuments(event: ChangeEvent<HTMLInputElement>) {
+  async function addDocuments(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     if (!files.length) return;
+    setDocumentError("");
     setDocuments((current) => [
       ...files.map((file) => ({
         name: file.name,
@@ -68,10 +83,22 @@ export default function VivaApp() {
       })),
       ...current,
     ]);
-    window.setTimeout(() => {
-      setDocuments((current) => current.map((doc) => ({ ...doc, status: "Ready" })));
-    }, 1400);
     event.target.value = "";
+    for (const file of files) {
+      try {
+        const form = new FormData(); form.set("file", file);
+        const response = await fetch("/api/documents", { method: "POST", body: form });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Upload failed");
+        setDocuments((current) => current.map((doc) => doc.name === file.name && doc.status === "Processing" ? {
+          id: data.document.id, name: data.document.fileName, size: formatBytes(data.document.sizeBytes), status: "Ready", date: "Added just now",
+        } : doc));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Upload failed";
+        setDocumentError(message);
+        setDocuments((current) => current.map((doc) => doc.name === file.name && doc.status === "Processing" ? { ...doc, status: "Failed", error: message } : doc));
+      }
+    }
   }
 
   return (
@@ -114,7 +141,7 @@ export default function VivaApp() {
         {view === "home" && <Dashboard onStart={beginPractice} setView={setView} />}
         {view === "practice" && !sessionOpen && <PracticeSetup difficulty={difficulty} setDifficulty={setDifficulty} onStart={beginPractice} />}
         {view === "progress" && <Progress />}
-        {view === "settings" && <Settings documents={documents} addDocuments={addDocuments} />}
+        {view === "settings" && <Settings documents={documents} addDocuments={addDocuments} documentError={documentError} />}
         {view === "practice" && sessionOpen && (
           <VivaSession
             answer={answer}
@@ -214,6 +241,41 @@ function PracticeSetup({ difficulty, setDifficulty, onStart }: { difficulty: Dif
 }
 
 function VivaSession(props: { answer: string; setAnswer: (value: string) => void; question: number; recording: boolean; setRecording: (value: boolean) => void; feedbackOpen: boolean; submitAnswer: () => void; nextQuestion: () => void; onExit: () => void }) {
+  const [sessionId, setSessionId] = useState("");
+  const [questionText, setQuestionText] = useState("Preparing a syllabus-grounded question…");
+  const [hint, setHint] = useState("Your examiner is reviewing the relevant learning material.");
+  const [sourceBasis, setSourceBasis] = useState("");
+  const [feedback, setFeedback] = useState<VivaFeedback | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [apiError, setApiError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/viva", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start", subject: "Data Structures", difficulty: "Standard" }) })
+      .then(async (response) => { const data = await response.json(); if (!response.ok) throw new Error(data.error || "Could not start the viva"); return data; })
+      .then((data) => { if (!active) return; setSessionId(data.sessionId); setQuestionText(data.question); setHint(data.hint); setSourceBasis(data.sourceBasis); })
+      .catch((error) => { if (active) { setApiError(error instanceof Error ? error.message : "AI examiner unavailable"); setQuestionText("Why is the time complexity of searching in a balanced binary search tree logarithmic?"); setHint("Demo mode: explain the relationship between tree height and the number of nodes."); } })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  async function evaluateAnswer() {
+    if (!props.answer.trim() || loading) return;
+    if (!sessionId) { setApiError("Connect the OpenAI key and database to evaluate live answers."); return; }
+    setLoading(true); setApiError("");
+    try {
+      const response = await fetch("/api/viva", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "answer", sessionId, subject: "Data Structures", difficulty: "Standard", question: questionText, answer: props.answer, questionNumber: props.question }) });
+      const data = await response.json(); if (!response.ok) throw new Error(data.error || "Evaluation failed");
+      setFeedback(data as VivaFeedback);
+    } catch (error) { setApiError(error instanceof Error ? error.message : "Evaluation failed"); }
+    finally { setLoading(false); }
+  }
+
+  function advance() {
+    if (!feedback) return;
+    setQuestionText(feedback.nextQuestion); setHint(feedback.nextHint); setSourceBasis(feedback.sourceBasis); setFeedback(null); props.nextQuestion();
+  }
+
   const progress = props.question * 10;
   return <div className="session-page">
     <header className="session-header"><button onClick={props.onExit}>← <span>Exit session</span></button><div><strong>Data Structures</strong><span>Standard practice</span></div><span className="session-counter">{props.question} / 10</span></header>
@@ -221,24 +283,26 @@ function VivaSession(props: { answer: string; setAnswer: (value: string) => void
     <div className="session-content">
       <div className="examiner"><div className="examiner-avatar">AI<span /></div><div><strong>Your examiner</strong><span>Listening carefully</span></div></div>
       <div className="question-label">QUESTION {props.question}</div>
-      <h1>Why is the time complexity of searching in a balanced binary search tree logarithmic?</h1>
-      <p className="question-hint">Explain the relationship between the tree height and the number of nodes. Use an example if helpful.</p>
-      {!props.feedbackOpen ? <>
+      <h1>{questionText}</h1>
+      <p className="question-hint">{hint}</p>
+      {sourceBasis && <p className="source-basis">Grounded in: {sourceBasis}</p>}
+      {apiError && <div className="api-notice"><strong>Setup needed</strong><span>{apiError}</span></div>}
+      {!feedback ? <>
         <div className={props.recording ? "answer-box recording" : "answer-box"}>
           <textarea value={props.answer} onChange={(e) => props.setAnswer(e.target.value)} placeholder="Explain your answer here, or tap the microphone to speak…" aria-label="Your viva answer" />
-          <div className="answer-tools"><span>{props.answer.length} characters</span><button className="mic-button" onClick={() => props.setRecording(!props.recording)} aria-label="Record answer">{props.recording ? "■" : "●"}</button><button className="submit-button" disabled={!props.answer.trim()} onClick={props.submitAnswer}>Submit answer →</button></div>
+          <div className="answer-tools"><span>{props.answer.length} characters</span><button className="mic-button" onClick={() => props.setRecording(!props.recording)} aria-label="Record answer">{props.recording ? "■" : "●"}</button><button className="submit-button" disabled={!props.answer.trim() || loading} onClick={evaluateAnswer}>{loading ? "Working…" : "Submit answer →"}</button></div>
         </div>
         <div className="session-help"><button>💡 Give me a hint</button><button>↷ Skip this question</button></div>
-      </> : <Feedback onNext={props.nextQuestion} />}
+      </> : <Feedback feedback={feedback} onNext={advance} />}
     </div>
   </div>;
 }
 
-function Feedback({ onNext }: { onNext: () => void }) {
+function Feedback({ feedback, onNext }: { feedback: VivaFeedback; onNext: () => void }) {
   return <section className="feedback-card">
-    <div className="feedback-top"><div className="feedback-score"><strong>8.2</strong><span>/10</span></div><div><span className="result-pill">STRONG ANSWER</span><h3>Clear concept, with one missing detail.</h3></div></div>
-    <div className="feedback-columns"><div><h4><span>✓</span> What you explained well</h4><ul><li>Connected search time directly to tree height.</li><li>Correctly stated that each comparison removes half the search space.</li></ul></div><div><h4><span>+</span> Add this to make it complete</h4><p>Mention that a balanced tree with <em>n</em> nodes has height proportional to log₂(n), which formally establishes O(log n).</p></div></div>
-    <div className="delivery-scores"><span>Concept <strong>88%</strong></span><span>Clarity <strong>82%</strong></span><span>Completeness <strong>76%</strong></span></div>
+    <div className="feedback-top"><div className="feedback-score"><strong>{Number(feedback.score).toFixed(1)}</strong><span>/{feedback.maxScore}</span></div><div><span className="result-pill">{feedback.verdict.toUpperCase()}</span><h3>{feedback.summary}</h3></div></div>
+    <div className="feedback-columns"><div><h4><span>✓</span> What you explained well</h4><ul>{feedback.correctPoints.map((point) => <li key={point}>{point}</li>)}</ul></div><div><h4><span>+</span> Add this to make it complete</h4>{feedback.missingPoints.length ? <ul>{feedback.missingPoints.map((point) => <li key={point}>{point}</li>)}</ul> : <p>Your answer covered the required points.</p>}{feedback.incorrectClaims.map((claim) => <p className="incorrect-claim" key={claim}>Correction: {claim}</p>)}</div></div>
+    <div className="delivery-scores"><span>Concept <strong>{Math.round(feedback.conceptScore)}%</strong></span><span>Clarity <strong>{Math.round(feedback.clarityScore)}%</strong></span><span>Completeness <strong>{Math.round(feedback.completenessScore)}%</strong></span></div>
     <div className="feedback-actions"><button className="ghost-button">View model answer</button><button className="primary-button" onClick={onNext}>Next question →</button></div>
   </section>;
 }
@@ -258,7 +322,7 @@ function Progress() {
 
 function Metric({ value, label, change }: { value: string; label: string; change: string }) { return <div className="metric-card"><strong>{value}</strong><span>{label}</span><small>↗ {change}</small></div>; }
 
-function Settings({ documents, addDocuments }: { documents: { name: string; size: string; status: string; date: string }[]; addDocuments: (event: ChangeEvent<HTMLInputElement>) => void }) {
+function Settings({ documents, addDocuments, documentError }: { documents: DocumentRecord[]; addDocuments: (event: ChangeEvent<HTMLInputElement>) => void; documentError: string }) {
   const [tab, setTab] = useState("syllabus");
   const totalSize = useMemo(() => documents.length, [documents]);
   return <div className="page settings-page">
@@ -269,8 +333,9 @@ function Settings({ documents, addDocuments }: { documents: { name: string; size
         {tab === "syllabus" ? <>
           <div className="content-heading"><div><h2>Syllabus & learning material</h2><p>Questions and evaluations will be grounded in these documents.</p></div><span className="document-count">{totalSize} documents</span></div>
           <label className="upload-zone"><input type="file" multiple accept=".pdf,.doc,.docx,.txt" onChange={addDocuments}/><span className="upload-icon">⇧</span><strong>Drop documents here or <u>browse files</u></strong><small>PDF, DOCX or TXT · Maximum 25 MB per file</small></label>
-          <div className="document-list"><div className="document-list-head"><span>DOCUMENT</span><span>STATUS</span><span>LAST UPDATED</span><span /></div>{documents.map((doc) => <div className="document-row" key={`${doc.name}-${doc.date}`}><div className="file-cell"><span className="file-icon">PDF</span><div><strong>{doc.name}</strong><small>{doc.size}</small></div></div><span className={doc.status === "Ready" ? "ready-status" : "processing-status"}>{doc.status === "Ready" ? "✓" : "◌"} {doc.status}</span><span className="date-cell">{doc.date}</span><button aria-label={`Options for ${doc.name}`}>•••</button></div>)}</div>
-          <div className="knowledge-card"><span>✦</span><div><strong>Knowledge base is ready</strong><p>{documents.length} documents have been organised into 35 topics. New uploads are automatically indexed and connected to the correct unit.</p></div><button>Review topics →</button></div>
+          {documentError && <div className="settings-error"><strong>Upload needs attention</strong><span>{documentError}</span></div>}
+          <div className="document-list"><div className="document-list-head"><span>DOCUMENT</span><span>STATUS</span><span>LAST UPDATED</span><span /></div>{documents.length ? documents.map((doc) => <div className="document-row" key={`${doc.id ?? doc.name}-${doc.date}`} title={doc.error}><div className="file-cell"><span className="file-icon">{doc.name.split(".").pop()?.slice(0,4).toUpperCase()}</span><div><strong>{doc.name}</strong><small>{doc.size}</small></div></div><span className={doc.status === "Ready" ? "ready-status" : doc.status === "Failed" ? "failed-status" : "processing-status"}>{doc.status === "Ready" ? "✓" : doc.status === "Failed" ? "!" : "◌"} {doc.status}</span><span className="date-cell">{doc.date}</span><button aria-label={`Options for ${doc.name}`}>•••</button></div>) : <div className="empty-documents"><strong>No syllabus documents yet</strong><span>Upload the first document to create your private knowledge base.</span></div>}</div>
+          <div className="knowledge-card"><span>✦</span><div><strong>{documents.some((doc) => doc.status === "Ready") ? "Private knowledge base is ready" : "Your private knowledge base"}</strong><p>{documents.filter((doc) => doc.status === "Ready").length} indexed documents. Every user receives an isolated document store and syllabus search index.</p></div><button>Review topics →</button></div>
         </> : <PreferencePanel tab={tab} />}
       </section>
     </div>
@@ -289,3 +354,16 @@ function PreferencePanel({ tab }: { tab: string }) {
     <button className="primary-button">Save preferences</button>
   </div></>;
 }
+
+function formatBytes(value: number) {
+  if (!Number.isFinite(value)) return "0 MB";
+  return value < 1024 * 1024 ? `${Math.max(1, Math.round(value / 1024))} KB` : `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatDate(value: number) {
+  if (!value) return "Recently";
+  const date = new Date(value < 10_000_000_000 ? value * 1000 : value);
+  return Number.isNaN(date.getTime()) ? "Recently" : date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+function titleCase(value: string) { return value ? value[0].toUpperCase() + value.slice(1) : "Processing"; }

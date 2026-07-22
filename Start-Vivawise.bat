@@ -8,6 +8,13 @@ cd /d "%~dp0"
 set "CODEX_NODE_DIR=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin"
 set "CODEX_PNPM=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\fallback\pnpm.cmd"
 
+if not exist ".env.local" (
+    echo.
+    echo  NOTE: OpenAI is not configured for local AI responses yet.
+    echo  Run Configure-OpenAI-Key.bat to enable the real examiner.
+    echo.
+)
+
 echo.
 echo  =====================================================
 echo                  VIVAWISE LOCAL APP
