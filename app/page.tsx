@@ -40,6 +40,18 @@ type VivaFeedback = {
   sourceBasis: string;
   completed?: boolean;
   demo?: boolean;
+  finalScore?: number;
+  questionWeight?: number;
+  answers?: VivaAnswerReview[];
+};
+type VivaAnswerReview = {
+  number: number;
+  question: string;
+  studentAnswer: string;
+  expectedAnswer: string;
+  scoreOutOfTen: number;
+  weight: number;
+  marksAwarded: number;
 };
 type AssignedTopic = {
   id: string;
@@ -957,6 +969,26 @@ function Feedback({
   feedback: VivaFeedback;
   onNext: () => void;
 }) {
+  function downloadReport() {
+    if (!feedback.answers?.length) return;
+    const escapeHtml = (value: string) =>
+      value.replace(/[&<>"']/g, (character) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character] || character,
+      );
+    const answerSections = feedback.answers
+      .map(
+        (item) => `<section><h2>Question ${item.number}</h2><p><strong>Question:</strong> ${escapeHtml(item.question)}</p><p><strong>Your answer:</strong> ${escapeHtml(item.studentAnswer)}</p><p><strong>Expected answer:</strong> ${escapeHtml(item.expectedAnswer)}</p><p><strong>Marks:</strong> ${item.marksAwarded.toFixed(1)} / ${item.weight.toFixed(1)}</p></section>`,
+      )
+      .join("");
+    const report = `<!doctype html><html><head><meta charset="utf-8"><title>Vivawise Viva Report</title><style>body{font-family:Arial,sans-serif;max-width:850px;margin:40px auto;color:#102d3b;line-height:1.55}header{border-bottom:3px solid #15927f;margin-bottom:24px}section{border-bottom:1px solid #d9e2df;padding:10px 0 22px}h1,h2{font-family:Georgia,serif}.score{font-size:32px;color:#087d6c}p{white-space:pre-wrap}</style></head><body><header><h1>Vivawise Viva Report</h1><p class="score">Final score: ${Number(feedback.finalScore || 0).toFixed(1)}%</p><p>${feedback.answers.length} questions · ${Number(feedback.questionWeight || 0).toFixed(1)} marks per question</p></header>${answerSections}</body></html>`;
+    const url = URL.createObjectURL(new Blob([report], { type: "text/html;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `vivawise-viva-report-${new Date().toISOString().slice(0, 10)}.html`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   if (feedback.completed)
     return (
       <section className="feedback-card completion-card">
@@ -964,9 +996,14 @@ function Feedback({
         <span className="eyebrow">VIVA COMPLETED</span>
         <h2>{feedback.demo ? "Demo attempt completed" : "Test completed"}</h2>
         <div className="completion-score">
-          {Number(feedback.score).toFixed(1)}
-          <small>/10 on final answer</small>
+          {Number(feedback.finalScore ?? feedback.score * 10).toFixed(1)}%
+          <small>final weighted score</small>
         </div>
+        {feedback.questionWeight && feedback.answers?.length ? (
+          <p>
+            {feedback.answers.length} questions · {feedback.questionWeight.toFixed(1)} marks each
+          </p>
+        ) : null}
         <p>{feedback.summary}</p>
         {feedback.demo && (
           <div className="api-notice">
@@ -977,9 +1014,16 @@ function Feedback({
             </span>
           </div>
         )}
-        <button className="primary-button" onClick={onNext}>
-          Return to dashboard
-        </button>
+        <div className="feedback-actions">
+          {feedback.answers?.length ? (
+            <button className="ghost-button" onClick={downloadReport}>
+              Download answers &amp; expected answers
+            </button>
+          ) : null}
+          <button className="primary-button" onClick={onNext}>
+            Return to dashboard
+          </button>
+        </div>
       </section>
     );
   return (

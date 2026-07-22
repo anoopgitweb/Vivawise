@@ -92,6 +92,35 @@ const feedbackSchema = {
   ],
 };
 
+type StoredAnswer = {
+  question: string;
+  answer: string;
+  score: number;
+  feedback: { modelAnswer?: string } | null;
+};
+
+function buildAttemptResult(rows: StoredAnswer[], totalQuestions: number) {
+  const questionWeight = 100 / Math.max(1, totalQuestions);
+  const answers = rows.map((row, index) => {
+    const scoreOutOfTen = Math.max(0, Math.min(10, Number(row.score) || 0));
+    return {
+      number: index + 1,
+      question: row.question,
+      studentAnswer: row.answer,
+      expectedAnswer:
+        row.feedback?.modelAnswer || "No expected answer was recorded.",
+      scoreOutOfTen,
+      weight: questionWeight,
+      marksAwarded: (scoreOutOfTen / 10) * questionWeight,
+    };
+  });
+  const finalScore = Math.max(
+    0,
+    Math.min(100, answers.reduce((sum, row) => sum + row.marksAwarded, 0)),
+  );
+  return { finalScore, questionWeight, answers };
+}
+
 export async function POST(request: Request) {
   try {
     const user = await requireVivaUser(request);
@@ -240,29 +269,30 @@ export async function POST(request: Request) {
       if ((answerCount || 0) >= totalQuestions) {
         const { data: existingAnswers } = await sb
           .from("attempt_answers")
-          .select("score")
-          .eq("attempt_id", body.sessionId);
-        const average =
-          (existingAnswers || []).reduce(
-            (sum, row) => sum + Number(row.score),
-            0,
-          ) / Math.max(1, (existingAnswers || []).length);
+          .select("question,answer,score,feedback")
+          .eq("attempt_id", body.sessionId)
+          .order("created_at", { ascending: true });
+        const attemptResult = buildAttemptResult(
+          (existingAnswers || []) as StoredAnswer[],
+          totalQuestions,
+        );
         await sb
           .from("test_attempts")
           .update({
             status: "completed",
-            score: average * 10,
+            score: attemptResult.finalScore,
             completed_at: new Date().toISOString(),
           })
           .eq("id", body.sessionId);
         return Response.json({
           ...demoFeedback("", totalQuestions, totalQuestions),
-          score: average,
+          score: attemptResult.finalScore / 10,
           maxScore: 10,
           summary:
             "Your saved attempt has been completed and the result is now available.",
           completed: true,
           demo: !getVivaEnv().OPENAI_API_KEY,
+          ...attemptResult,
         });
       }
       const prompt = `You are Vivawise, a fair university viva examiner. ${test.instructions ? `Examiner instructions: ${test.instructions}` : ""} ${vectorStoreId ? "You MUST use file search and evaluate only against the attached test documents. Do not introduce outside facts." : "Evaluate using foundational knowledge."} Question: ${body.question}. Student answer: ${body.answer}. Score 0 to 10. Then generate question ${(answerCount || 0) + 2} of ${totalQuestions}, also grounded only in the attached documents and following the examiner instructions.`;
@@ -288,19 +318,28 @@ export async function POST(request: Request) {
       if (completed) {
         const { data: all } = await sb
           .from("attempt_answers")
-          .select("score")
-          .eq("attempt_id", body.sessionId);
-        const average =
-          (all || []).reduce((sum, row) => sum + Number(row.score), 0) /
-          Math.max(1, (all || []).length);
+          .select("question,answer,score,feedback")
+          .eq("attempt_id", body.sessionId)
+          .order("created_at", { ascending: true });
+        const attemptResult = buildAttemptResult(
+          (all || []) as StoredAnswer[],
+          totalQuestions,
+        );
         await sb
           .from("test_attempts")
           .update({
             status: "completed",
-            score: average * 10,
+            score: attemptResult.finalScore,
             completed_at: new Date().toISOString(),
           })
           .eq("id", body.sessionId);
+        return Response.json({
+          ...result,
+          completed: true,
+          demo: demoMode,
+          grounded: !demoMode && Boolean(vectorStoreId),
+          ...attemptResult,
+        });
       }
       return Response.json({
         ...result,
