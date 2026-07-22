@@ -351,7 +351,7 @@ export default function VivaApp() {
             .filter((item) =>
               role === "admin"
                 ? item.id.startsWith("admin")
-                : !item.id.startsWith("admin"),
+                : !item.id.startsWith("admin") && item.id !== "settings",
             )
             .map((item) => (
               <button
@@ -449,7 +449,7 @@ export default function VivaApp() {
           />
         )}
         {view === "progress" && <Progress />}
-        {view === "settings" && (
+        {view === "settings" && role === "admin" && (
           <Settings
             documents={documents}
             addDocuments={addDocuments}
@@ -760,7 +760,6 @@ function Dashboard({
           <h2>Your subjects</h2>
           <p>Practice by syllabus topic</p>
         </div>
-        <button onClick={() => setView("settings")}>Manage syllabus →</button>
       </div>
       <div className="subject-grid">
         {subjects.map((subject) => (
