@@ -537,6 +537,70 @@ button {
   gap: 16px;
   margin-top: 18px;
 }
+.attempt-history-title {
+  margin-top: 28px;
+}
+.student-attempts {
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+.student-attempt-head,
+.student-attempt-row {
+  display: grid;
+  grid-template-columns: 1.35fr 1.4fr 0.6fr 0.7fr 0.55fr 1fr;
+  gap: 14px;
+  align-items: center;
+  min-width: 850px;
+  padding: 13px 16px;
+}
+.student-attempt-head {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+}
+.student-attempt-row {
+  border-top: 1px solid var(--line);
+  font-size: 10px;
+}
+.student-attempt-row code {
+  font-family: Consolas, monospace;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.student-attempt-row span strong,
+.student-attempt-row span small {
+  display: block;
+}
+.student-attempt-row span small,
+.student-attempt-row time {
+  color: var(--muted);
+  font-size: 8px;
+}
+.attempt-status {
+  width: fit-content;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #eef2f0;
+  text-transform: capitalize;
+}
+.attempt-status.completed {
+  background: #e1f3ec;
+  color: var(--teal);
+}
+.attempt-status.in_progress {
+  background: #fff3d9;
+  color: #956000;
+}
+.student-attempt-empty {
+  padding: 24px 16px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+}
 .activity-panel,
 .next-panel,
 .analytics-card,

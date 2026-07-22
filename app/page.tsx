@@ -70,6 +70,18 @@ type SyllabusModule = {
   title: string;
   description: string;
 };
+type StudentAttempt = {
+  id: string;
+  status: "in_progress" | "completed" | "abandoned";
+  score: number | null;
+  selectedModule: string;
+  startedAt: string;
+  completedAt?: string | null;
+  vivaName: string;
+  subject: string;
+  questionCount: number;
+  answeredCount: number;
+};
 
 const subjects = [
   {
@@ -102,7 +114,7 @@ const weakAreas = [
 ];
 
 const navItems: { id: View; label: string; icon: string }[] = [
-  { id: "home", label: "Home", icon: "⌂" },
+  { id: "home", label: "Dashboard", icon: "⌂" },
   { id: "practice", label: "Practice", icon: "◉" },
   { id: "progress", label: "Progress", icon: "↗" },
   { id: "settings", label: "Settings", icon: "⚙" },
@@ -136,6 +148,8 @@ export default function VivaApp() {
     null,
   );
   const [selectedSyllabusModule, setSelectedSyllabusModule] = useState("");
+  const [studentAttempts, setStudentAttempts] = useState<StudentAttempt[]>([]);
+  const [attemptsLoading, setAttemptsLoading] = useState(false);
 
   useEffect(() => {
     fetch("/api/documents")
@@ -196,6 +210,21 @@ export default function VivaApp() {
       })
       .catch(() => {});
   }, [view]);
+
+  useEffect(() => {
+    if (role !== "student") return;
+    setAttemptsLoading(true);
+    fetch("/api/attempts")
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok)
+          throw new Error(data.error || "Could not load attempts.");
+        return data;
+      })
+      .then((data) => setStudentAttempts(data.attempts || []))
+      .catch(() => setStudentAttempts([]))
+      .finally(() => setAttemptsLoading(false));
+  }, [role, view]);
 
   function beginPractice(topic?: AssignedTopic) {
     const chosen = topic ?? selectedTopic ?? assignedTopics[0];
@@ -380,7 +409,13 @@ export default function VivaApp() {
         </header>
 
         {view === "home" && (
-          <Dashboard onStart={() => beginPractice()} setView={setView} />
+          <Dashboard
+            onStart={() => beginPractice()}
+            setView={setView}
+            attempts={studentAttempts}
+            loading={attemptsLoading}
+            studentName={currentUser?.fullName || "Student"}
+          />
         )}
         {view === "practice" && !sessionOpen && (
           <PracticeSetup
@@ -586,16 +621,40 @@ function Brand() {
 function Dashboard({
   onStart,
   setView,
+  attempts,
+  loading,
+  studentName,
 }: {
   onStart: () => void;
   setView: (view: View) => void;
+  attempts: StudentAttempt[];
+  loading: boolean;
+  studentName: string;
 }) {
+  const completedAttempts = attempts.filter(
+    (attempt) => attempt.status === "completed",
+  );
+  const averageScore = completedAttempts.length
+    ? completedAttempts.reduce(
+        (sum, attempt) => sum + Number(attempt.score || 0),
+        0,
+      ) / completedAttempts.length
+    : 0;
+  const totalAnswers = attempts.reduce(
+    (sum, attempt) => sum + attempt.answeredCount,
+    0,
+  );
+  const bestScore = completedAttempts.length
+    ? Math.max(
+        ...completedAttempts.map((attempt) => Number(attempt.score || 0)),
+      )
+    : 0;
   return (
     <div className="page dashboard-page">
       <div className="page-heading">
         <div>
           <span className="eyebrow">WEDNESDAY, 22 JULY</span>
-          <h1>Good afternoon, Arjun.</h1>
+          <h1>Good afternoon, {studentName}.</h1>
           <p>One focused session today will keep your momentum going.</p>
         </div>
         <button className="primary-button desktop-action" onClick={onStart}>
@@ -607,9 +666,9 @@ function Dashboard({
         <div className="readiness-copy">
           <span className="card-kicker">YOUR VIVA READINESS</span>
           <div className="score-row">
-            <strong>68</strong>
+            <strong>{Math.round(averageScore)}</strong>
             <span>/100</span>
-            <em>+6 this week</em>
+            <em>{completedAttempts.length} completed</em>
           </div>
           <h2>You&apos;re building strong foundations.</h2>
           <p>
@@ -622,24 +681,71 @@ function Dashboard({
         </div>
         <div className="readiness-visual">
           <div className="orbital-score">
-            <span>68%</span>
+            <span>{Math.round(averageScore)}%</span>
             <small>READY</small>
           </div>
           <div className="floating-note note-one">
             <span>✓</span>
             <div>
-              <strong>32 answers</strong>
+              <strong>{totalAnswers} answers</strong>
               <small>evaluated</small>
             </div>
           </div>
           <div className="floating-note note-two">
             <span>↗</span>
             <div>
-              <strong>74%</strong>
-              <small>best topic</small>
+              <strong>{completedAttempts.length ? `${bestScore.toFixed(0)}%` : "—"}</strong>
+              <small>best score</small>
             </div>
           </div>
         </div>
+      </section>
+
+      <div className="section-title attempt-history-title">
+        <div>
+          <h2>Your Viva attempts</h2>
+          <p>Scores, progress and selected syllabus modules</p>
+        </div>
+        <button onClick={() => setView("practice")}>Start another Viva →</button>
+      </div>
+      <section className="student-attempts">
+        <div className="student-attempt-head">
+          <span>ATTEMPT ID</span>
+          <span>VIVA / MODULE</span>
+          <span>PROGRESS</span>
+          <span>STATUS</span>
+          <span>SCORE</span>
+          <span>DATE</span>
+        </div>
+        {attempts.map((attempt) => (
+          <div className="student-attempt-row" key={attempt.id}>
+            <code title={attempt.id}>{attempt.id}</code>
+            <span>
+              <strong>{attempt.vivaName}</strong>
+              <small>{attempt.selectedModule}</small>
+            </span>
+            <span>
+              {attempt.answeredCount} / {attempt.questionCount}
+            </span>
+            <span className={`attempt-status ${attempt.status}`}>
+              {attempt.status.replace("_", " ")}
+            </span>
+            <strong>
+              {attempt.status === "completed" && attempt.score !== null
+                ? `${attempt.score.toFixed(1)}%`
+                : "—"}
+            </strong>
+            <time>
+              {new Date(attempt.completedAt || attempt.startedAt).toLocaleString()}
+            </time>
+          </div>
+        ))}
+        {loading && <div className="student-attempt-empty">Loading attempts…</div>}
+        {!loading && !attempts.length && (
+          <div className="student-attempt-empty">
+            You have not started a Viva yet.
+          </div>
+        )}
       </section>
 
       <div className="section-title">
