@@ -2544,6 +2544,19 @@ button {
 .admin-table-row.results {
   grid-template-columns: 1.35fr 1.1fr 1.2fr 0.7fr 0.5fr 1fr;
 }
+.results-refresh {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.results-refresh small {
+  color: var(--muted);
+  font-size: 9px;
+}
+.results-refresh .primary-button {
+  width: auto;
+  min-width: 130px;
+}
 .usage-second {
   margin-top: 16px;
 }

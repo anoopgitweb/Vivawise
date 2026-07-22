@@ -7,6 +7,22 @@ import {
 } from "../../../../lib/openai";
 import { requireSupabaseAdmin, supabaseAdmin } from "../../../../lib/supabase";
 
+async function fetchAllAttempts(sb: ReturnType<typeof supabaseAdmin>) {
+  const pageSize = 1000;
+  const rows: any[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await sb
+      .from("test_attempts")
+      .select("id,test_id,user_id,status,score,started_at,completed_at,selected_module")
+      .order("started_at", { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) return { data: null, error };
+    rows.push(...(data || []));
+    if (!data || data.length < pageSize) break;
+  }
+  return { data: rows, error: null };
+}
+
 export async function GET(request: Request) {
   try {
     await requireSupabaseAdmin(request);
@@ -31,10 +47,7 @@ export async function GET(request: Request) {
         .select("id,email,full_name,role")
         .eq("role", "student")
         .order("full_name"),
-      sb
-        .from("test_attempts")
-        .select("id,test_id,user_id,status,score,started_at,completed_at")
-        .order("started_at", { ascending: false }),
+      fetchAllAttempts(sb),
       sb
         .from("test_documents")
         .select("id,test_id,file_name,status,created_at,error_message")

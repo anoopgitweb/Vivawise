@@ -1527,7 +1527,12 @@ function AdminSummaryPanel({
   const [topics, setTopics] = useState<AdminTopic[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [error, setError] = useState("");
-  useEffect(() => {
+  const [loading, setLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  async function loadAdminData() {
+    setLoading(true);
+    setError("");
     fetch("/api/admin/topics")
       .then(async (response) => {
         const data = await response.json();
@@ -1538,6 +1543,7 @@ function AdminSummaryPanel({
       .then((data) => {
         setTopics(data.topics || []);
         setUsers(data.users || []);
+        setLastUpdated(new Date());
       })
       .catch((reason) =>
         setError(
@@ -1545,7 +1551,12 @@ function AdminSummaryPanel({
             ? reason.message
             : "Could not load admin data",
         ),
-      );
+      )
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    loadAdminData();
   }, []);
   const attempts = topics.flatMap((topic) =>
     (topic.attempts || []).map((attempt) => ({
@@ -1622,6 +1633,18 @@ function AdminSummaryPanel({
             <span className="eyebrow">ADMIN · RESULTS</span>
             <h1>Viva results</h1>
             <p>Review all attempts across students and modules.</p>
+          </div>
+          <div className="results-refresh">
+            {lastUpdated && (
+              <small>Updated {lastUpdated.toLocaleTimeString()}</small>
+            )}
+            <button
+              className="primary-button"
+              onClick={loadAdminData}
+              disabled={loading}
+            >
+              {loading ? "Refreshing…" : "Refresh attempts"}
+            </button>
           </div>
         </div>
         <div className="admin-table">
