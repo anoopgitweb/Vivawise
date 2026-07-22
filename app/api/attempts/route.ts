@@ -4,24 +4,13 @@ export async function GET(request: Request) {
   try {
     const user = await requireAppUser(request);
     const sb = supabaseAdmin();
-    let { data, error } = await sb
+    const { data, error } = await sb
       .from("test_attempts")
       .select(
-        "id,status,score,selected_module,started_at,completed_at,tests(name,subject,question_count),attempt_answers(count)",
+        "id,status,score,started_at,completed_at,tests(name,subject,question_count),attempt_answers(count)",
       )
       .eq("user_id", user.id)
       .order("started_at", { ascending: false });
-    if (error && error.message.includes("selected_module")) {
-      const fallback = await sb
-        .from("test_attempts")
-        .select(
-          "id,status,score,started_at,completed_at,tests(name,subject,question_count),attempt_answers(count)",
-        )
-        .eq("user_id", user.id)
-        .order("started_at", { ascending: false });
-      data = fallback.data as typeof data;
-      error = fallback.error;
-    }
     if (error) throw error;
     return Response.json({
       attempts: (data || []).map((attempt: any) => ({
@@ -31,7 +20,6 @@ export async function GET(request: Request) {
           attempt.score === null || attempt.score === undefined
             ? null
             : Number(attempt.score),
-        selectedModule: attempt.selected_module || "All syllabus modules",
         startedAt: attempt.started_at,
         completedAt: attempt.completed_at,
         vivaName: attempt.tests?.name || "Viva",
