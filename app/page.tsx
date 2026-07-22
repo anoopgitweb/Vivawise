@@ -1433,7 +1433,9 @@ function AdminPanel() {
         setSelected((v) => v || d.topics?.[0]?.id || "");
       })
       .catch(() => setAuthenticated(false));
-  useEffect(load, []);
+  useEffect(() => {
+    void load();
+  }, []);
   async function create(event: React.FormEvent) {
     event.preventDefault();
     const r = await fetch("/api/admin/topics", {
