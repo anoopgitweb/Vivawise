@@ -286,6 +286,7 @@ export async function POST(request: Request) {
           .eq("id", body.sessionId);
         return Response.json({
           ...demoFeedback("", totalQuestions, totalQuestions),
+          attemptId: body.sessionId,
           score: attemptResult.finalScore / 10,
           maxScore: 10,
           summary:
@@ -335,6 +336,7 @@ export async function POST(request: Request) {
           .eq("id", body.sessionId);
         return Response.json({
           ...result,
+          attemptId: body.sessionId,
           completed: true,
           demo: demoMode,
           grounded: !demoMode && Boolean(vectorStoreId),

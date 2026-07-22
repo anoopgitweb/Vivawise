@@ -2187,6 +2187,20 @@ button {
   font-size: 10px;
   color: var(--muted);
 }
+.attempt-id {
+  color: var(--muted);
+  font-size: 10px;
+}
+.attempt-id code,
+.admin-attempt-id {
+  font-family: Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+.attempt-id code {
+  display: block;
+  color: var(--ink);
+  margin-top: 4px;
+}
 .completion-card > .api-notice {
   margin: 18px auto;
 }
@@ -2199,7 +2213,7 @@ button {
 }
 .attempt-results > div {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr minmax(120px, 0.7fr) auto auto;
   gap: 16px;
   align-items: center;
   padding: 8px 10px;
@@ -2437,7 +2451,7 @@ button {
 }
 .admin-table-head.results,
 .admin-table-row.results {
-  grid-template-columns: 1.1fr 1.2fr 0.7fr 0.5fr 1fr;
+  grid-template-columns: 1.35fr 1.1fr 1.2fr 0.7fr 0.5fr 1fr;
 }
 .usage-second {
   margin-top: 16px;
