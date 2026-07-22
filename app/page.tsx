@@ -795,6 +795,9 @@ function VivaSession(props: {
     props.topic.questionCount || 10,
   );
   const [demoMode, setDemoMode] = useState(false);
+  const [hintsAllowed, setHintsAllowed] = useState(true);
+  const [skippingAllowed, setSkippingAllowed] = useState(true);
+  const [hintVisible, setHintVisible] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -817,6 +820,8 @@ function VivaSession(props: {
         setSourceBasis(data.sourceBasis);
         setMaxQuestions(data.settings?.questionCount || 10);
         setDemoMode(Boolean(data.demo));
+        setHintsAllowed(data.settings?.hintsAllowed !== false);
+        setSkippingAllowed(data.settings?.skippingAllowed !== false);
       })
       .catch((error) => {
         if (active)
@@ -832,8 +837,8 @@ function VivaSession(props: {
     };
   }, [props.topic.id]);
 
-  async function evaluateAnswer() {
-    if (!props.answer.trim() || loading) return;
+  async function evaluateAnswer(skipped = false) {
+    if ((!props.answer.trim() && !skipped) || loading) return;
     if (!sessionId) {
       setApiError("This viva session could not be started.");
       return;
@@ -848,8 +853,9 @@ function VivaSession(props: {
           action: "answer",
           sessionId,
           question: questionText,
-          answer: props.answer,
+          answer: skipped ? "Question skipped by student." : props.answer,
           questionNumber: props.question,
+          skipped,
         }),
       });
       const data = await response.json();
@@ -872,6 +878,8 @@ function VivaSession(props: {
     setHint(feedback.nextHint);
     setSourceBasis(feedback.sourceBasis);
     setFeedback(null);
+    setHintVisible(false);
+    props.setAnswer("");
     props.nextQuestion();
   }
 
@@ -909,7 +917,7 @@ function VivaSession(props: {
         </div>
         <div className="question-label">QUESTION {props.question}</div>
         <h1>{questionText}</h1>
-        <p className="question-hint">{hint}</p>
+        {hintVisible && <p className="question-hint">{hint}</p>}
         {sourceBasis && (
           <p className="source-basis">Grounded in: {sourceBasis}</p>
         )}
@@ -944,15 +952,29 @@ function VivaSession(props: {
                 <button
                   className="submit-button"
                   disabled={!props.answer.trim() || loading}
-                  onClick={evaluateAnswer}
+                  onClick={() => evaluateAnswer(false)}
                 >
                   {loading ? "Working…" : "Submit answer →"}
                 </button>
               </div>
             </div>
             <div className="session-help">
-              <button>💡 Give me a hint</button>
-              <button>↷ Skip this question</button>
+              <button
+                disabled={!hintsAllowed}
+                onClick={() => setHintVisible(true)}
+              >
+                {hintsAllowed
+                  ? hintVisible
+                    ? "Hint shown"
+                    : "Give me a hint"
+                  : "Hints disabled"}
+              </button>
+              <button
+                disabled={!skippingAllowed || loading}
+                onClick={() => evaluateAnswer(true)}
+              >
+                {skippingAllowed ? "Skip this question" : "Skipping disabled"}
+              </button>
             </div>
           </>
         ) : (

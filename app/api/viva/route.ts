@@ -131,6 +131,7 @@ export async function POST(request: Request) {
       question?: string;
       answer?: string;
       questionNumber?: number;
+      skipped?: boolean;
     };
     const sb = supabaseAdmin();
 
@@ -254,6 +255,11 @@ export async function POST(request: Request) {
       const totalQuestions = Number(test?.question_count) || 10;
       const timeLimitMinutes = Number(test?.time_limit_minutes) || 20;
       const vectorStoreId = test?.openai_vector_store_id;
+      if (body.skipped && test?.skipping_allowed === false)
+        return Response.json(
+          { error: "Skipping is disabled for this viva." },
+          { status: 403 },
+        );
       if (
         Date.now() >
         new Date((owned as any).started_at).getTime() + timeLimitMinutes * 60000
@@ -306,11 +312,24 @@ export async function POST(request: Request) {
             feedbackSchema,
             vectorStoreId,
           );
+      if (body.skipped) {
+        Object.assign(result, {
+          score: 0,
+          verdict: "Question skipped",
+          summary: "This question was skipped and received zero marks.",
+          correctPoints: [],
+          missingPoints: ["No answer was submitted for this question."],
+          incorrectClaims: [],
+          conceptScore: 0,
+          clarityScore: 0,
+          completenessScore: 0,
+        });
+      }
       const score = Math.max(0, Math.min(10, Number(result.score) || 0));
       const { error } = await sb.from("attempt_answers").insert({
         attempt_id: body.sessionId,
         question: body.question,
-        answer: body.answer,
+        answer: body.skipped ? "Question skipped by student." : body.answer,
         score,
         feedback: result,
       });
