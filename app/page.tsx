@@ -48,6 +48,8 @@ type AssignedTopic = {
   description: string;
   difficulty: Difficulty;
   documentCount: number;
+  questionCount: number;
+  timeLimitMinutes: number;
 };
 
 const subjects = [
@@ -196,7 +198,9 @@ export default function VivaApp() {
   }
 
   function nextQuestion() {
-    setQuestion((value) => Math.min(10, value + 1));
+    setQuestion((value) =>
+      Math.min(selectedTopic?.questionCount || 10, value + 1),
+    );
     setAnswer("");
     setFeedbackOpen(false);
   }
@@ -727,11 +731,11 @@ function PracticeSetup({
         )}
         <div className="session-summary">
           <div>
-            <span>10</span>
+            <span>{selected?.questionCount ?? "—"}</span>
             <small>questions</small>
           </div>
           <div>
-            <span>~18</span>
+            <span>{selected?.timeLimitMinutes ?? "—"}</span>
             <small>minutes</small>
           </div>
           <div>
@@ -774,7 +778,9 @@ function VivaSession(props: {
   const [feedback, setFeedback] = useState<VivaFeedback | null>(null);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState("");
-  const [maxQuestions, setMaxQuestions] = useState(10);
+  const [maxQuestions, setMaxQuestions] = useState(
+    props.topic.questionCount || 10,
+  );
   const [demoMode, setDemoMode] = useState(false);
 
   useEffect(() => {

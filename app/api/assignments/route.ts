@@ -1,2 +1,37 @@
 import { requireAppUser, supabaseAdmin } from "../../../lib/supabase";
-export async function GET(request:Request){try{const user=await requireAppUser(request);const {data,error}=await supabaseAdmin().from("test_assignments").select("tests(id,name,subject,description,difficulty,test_documents(count))").eq("user_id",user.id).order("assigned_at",{ascending:false});if(error)throw error;const topics=(data||[]).map((row:any)=>row.tests).filter(Boolean).map((t:any)=>({id:t.id,title:t.name,subject:t.subject,description:t.description,difficulty:t.difficulty,documentCount:t.test_documents?.[0]?.count||0}));return Response.json({user:{email:user.email,displayName:user.fullName},topics});}catch(e){if(e instanceof Response)return e;return Response.json({error:e instanceof Error?e.message:"Unexpected error"},{status:500});}}
+export async function GET(request: Request) {
+  try {
+    const user = await requireAppUser(request);
+    const { data, error } = await supabaseAdmin()
+      .from("test_assignments")
+      .select(
+        "tests(id,name,subject,description,difficulty,question_count,time_limit_minutes,test_documents(count))",
+      )
+      .eq("user_id", user.id)
+      .order("assigned_at", { ascending: false });
+    if (error) throw error;
+    const topics = (data || [])
+      .map((row: any) => row.tests)
+      .filter(Boolean)
+      .map((t: any) => ({
+        id: t.id,
+        title: t.name,
+        subject: t.subject,
+        description: t.description,
+        difficulty: t.difficulty,
+        documentCount: t.test_documents?.[0]?.count || 0,
+        questionCount: Number(t.question_count) || 10,
+        timeLimitMinutes: Number(t.time_limit_minutes) || 20,
+      }));
+    return Response.json({
+      user: { email: user.email, displayName: user.fullName },
+      topics,
+    });
+  } catch (e) {
+    if (e instanceof Response) return e;
+    return Response.json(
+      { error: e instanceof Error ? e.message : "Unexpected error" },
+      { status: 500 },
+    );
+  }
+}
