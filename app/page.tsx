@@ -9,6 +9,7 @@ type View =
   | "settings"
   | "admin"
   | "admin_vivas"
+  | "admin_assign"
   | "admin_users"
   | "admin_results"
   | "admin_usage";
@@ -86,6 +87,7 @@ const navItems: { id: View; label: string; icon: string }[] = [
   { id: "settings", label: "Settings", icon: "⚙" },
   { id: "admin", label: "Create Viva", icon: "+" },
   { id: "admin_vivas", label: "Existing Vivas", icon: "V" },
+  { id: "admin_assign", label: "Assign Vivas", icon: "A" },
   { id: "admin_users", label: "Users", icon: "U" },
   { id: "admin_results", label: "Results", icon: "R" },
   { id: "admin_usage", label: "Usage", icon: "↗" },
@@ -365,6 +367,7 @@ export default function VivaApp() {
         )}
         {view === "admin" && <AdminPanel mode="create" />}
         {view === "admin_vivas" && <AdminPanel mode="existing" />}
+        {view === "admin_assign" && <AdminPanel mode="assign" />}
         {view === "admin_users" && <AdminSummaryPanel section="users" />}
         {view === "admin_results" && <AdminSummaryPanel section="results" />}
         {view === "admin_usage" && <AdminSummaryPanel section="usage" />}
@@ -1391,7 +1394,7 @@ function AdminSummaryPanel({
     </div>
   );
 }
-function AdminPanel({ mode }: { mode: "create" | "existing" }) {
+function AdminPanel({ mode }: { mode: "create" | "existing" | "assign" }) {
   const [authenticated, setAuthenticated] = useState(true);
   const [topics, setTopics] = useState<AdminTopic[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -1641,11 +1644,19 @@ function AdminPanel({ mode }: { mode: "create" | "existing" }) {
       <div className="page-heading">
         <div>
           <span className="eyebrow">ADMIN CONTROL CENTRE</span>
-          <h1>{mode === "create" ? "Create a new viva" : "Existing vivas"}</h1>
+          <h1>
+            {mode === "create"
+              ? "Create a new viva"
+              : mode === "existing"
+                ? "Existing vivas"
+                : "Assign vivas to students"}
+          </h1>
           <p>
             {mode === "create"
               ? "Configure a new viva module and its assessment rules."
-              : "Edit modules, attach source material and manage assigned students."}
+              : mode === "existing"
+                ? "Edit viva modules and manage their supporting documents."
+                : "Choose a viva and grant or remove access for registered students."}
           </p>
         </div>
       </div>
@@ -1840,9 +1851,11 @@ function AdminPanel({ mode }: { mode: "create" | "existing" }) {
             </button>
           </form>
         )}
-        {mode === "existing" && (
+        {(mode === "existing" || mode === "assign") && (
           <section className="admin-card">
-            <h2>Assign & upload</h2>
+            <h2>
+              {mode === "assign" ? "Assign students" : "Edit viva module"}
+            </h2>
             <label>
               Mock viva
               <select
@@ -1857,190 +1870,206 @@ function AdminPanel({ mode }: { mode: "create" | "existing" }) {
                 ))}
               </select>
             </label>
-            <form onSubmit={assign}>
-              <label>
-                Registered student
-                <select
-                  value={selectedUser}
-                  required
-                  onChange={(e) => setSelectedUser(e.target.value)}
-                >
-                  <option value="">Choose student</option>
-                  {users.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.full_name || user.email} — {user.email}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {!users.length && (
-                <small>No student accounts have registered yet.</small>
-              )}
-              <button
-                className="primary-button"
-                disabled={!selected || !selectedUser}
-              >
-                Assign student
-              </button>
-            </form>
-            <label className="admin-upload">
-              Supporting document
-              <input
-                type="file"
-                accept=".pdf,.doc,.docx,.txt"
-                onChange={upload}
-                disabled={!selected}
-              />
-            </label>
-            <div className="module-documents">
-              <strong>Attached documents</strong>
-              {topics.find((topic) => topic.id === selected)?.documents
-                ?.length ? (
-                topics
-                  .find((topic) => topic.id === selected)!
-                  .documents!.map((document) => (
-                    <span className="document-row" key={document.id}>
-                      <b title={document.error_message || undefined}>
-                        {document.file_name}
-                      </b>
-                      <em className={document.status}>{document.status}</em>
-                      {document.status !== "ready" && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            manageDocument("retry_document", document)
-                          }
-                        >
-                          Retry
-                        </button>
-                      )}
-                      <button
-                        className="delete-document"
-                        type="button"
-                        onClick={() =>
-                          manageDocument("delete_document", document)
-                        }
-                      >
-                        Delete
-                      </button>
-                      {document.error_message && (
-                        <small>{document.error_message}</small>
-                      )}
-                    </span>
-                  ))
-              ) : (
-                <small>No documents attached to this module.</small>
-              )}
-            </div>
-            <div className="prompt-editor">
-              <h3>Edit selected viva module</h3>
-              <label>
-                Module name
-                <input
-                  value={moduleTitle}
-                  onChange={(e) => setModuleTitle(e.target.value)}
-                  disabled={!selected}
-                />
-              </label>
-              <label>
-                Subject
-                <input
-                  value={moduleSubject}
-                  onChange={(e) => setModuleSubject(e.target.value)}
-                  disabled={!selected}
-                />
-              </label>
-              <label>
-                Description
-                <textarea
-                  value={moduleDescription}
-                  onChange={(e) => setModuleDescription(e.target.value)}
-                  disabled={!selected}
-                />
-              </label>
-              <div className="control-grid">
+            {mode === "assign" && (
+              <form onSubmit={assign}>
                 <label>
-                  Difficulty
+                  Registered student
                   <select
-                    value={moduleDifficulty}
-                    onChange={(e) =>
-                      setModuleDifficulty(e.target.value as Difficulty)
-                    }
+                    value={selectedUser}
+                    required
+                    onChange={(e) => setSelectedUser(e.target.value)}
                   >
-                    <option>Foundation</option>
-                    <option>Standard</option>
-                    <option>Challenge</option>
+                    <option value="">Choose student</option>
+                    {users.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.full_name || user.email} — {user.email}
+                      </option>
+                    ))}
                   </select>
                 </label>
-                <label>
-                  Questions
+                {!users.length && (
+                  <small>No student accounts have registered yet.</small>
+                )}
+                <button
+                  className="primary-button"
+                  disabled={!selected || !selectedUser}
+                >
+                  Assign student
+                </button>
+              </form>
+            )}
+            {mode === "existing" && (
+              <>
+                <label className="admin-upload">
+                  Supporting document
                   <input
-                    type="number"
-                    min="1"
-                    max="50"
-                    value={moduleQuestions}
-                    onChange={(e) => setModuleQuestions(Number(e.target.value))}
+                    type="file"
+                    accept=".pdf,.doc,.docx,.txt"
+                    onChange={upload}
+                    disabled={!selected}
                   />
                 </label>
-                <label>
-                  Minutes
-                  <input
-                    type="number"
-                    min="1"
-                    max="300"
-                    value={moduleTime}
-                    onChange={(e) => setModuleTime(Number(e.target.value))}
-                  />
-                </label>
-                <label>
-                  Attempts
-                  <input
-                    type="number"
-                    min="1"
-                    max="100"
-                    value={moduleAttempts}
-                    onChange={(e) => setModuleAttempts(Number(e.target.value))}
-                  />
-                </label>
-                <label>
-                  Pass mark (%)
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={modulePassMark}
-                    onChange={(e) => setModulePassMark(Number(e.target.value))}
-                  />
-                </label>
-              </div>
-              <label>
-                Examiner instructions / Prompt
-                <textarea
-                  value={savedInstructions}
-                  onChange={(e) => setSavedInstructions(e.target.value)}
-                  disabled={!selected}
-                  placeholder="Example: Ask only from Chapters 2–4. Focus on definitions, comparisons and practical examples. Avoid historical questions."
-                />
-              </label>
-              <small>
-                These instructions guide question selection, but questions
-                remain restricted to this test&apos;s attached documents.
-              </small>
-              <button
-                type="button"
-                className="primary-button"
-                disabled={!selected}
-                onClick={updateModule}
-              >
-                Save module changes
-              </button>
-            </div>
+                <div className="module-documents">
+                  <strong>Attached documents</strong>
+                  {topics.find((topic) => topic.id === selected)?.documents
+                    ?.length ? (
+                    topics
+                      .find((topic) => topic.id === selected)!
+                      .documents!.map((document) => (
+                        <span className="document-row" key={document.id}>
+                          <b title={document.error_message || undefined}>
+                            {document.file_name}
+                          </b>
+                          <em className={document.status}>{document.status}</em>
+                          {document.status !== "ready" && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                manageDocument("retry_document", document)
+                              }
+                            >
+                              Retry
+                            </button>
+                          )}
+                          <button
+                            className="delete-document"
+                            type="button"
+                            onClick={() =>
+                              manageDocument("delete_document", document)
+                            }
+                          >
+                            Delete
+                          </button>
+                          {document.error_message && (
+                            <small>{document.error_message}</small>
+                          )}
+                        </span>
+                      ))
+                  ) : (
+                    <small>No documents attached to this module.</small>
+                  )}
+                </div>
+                <div className="prompt-editor">
+                  <h3>Edit selected viva module</h3>
+                  <label>
+                    Module name
+                    <input
+                      value={moduleTitle}
+                      onChange={(e) => setModuleTitle(e.target.value)}
+                      disabled={!selected}
+                    />
+                  </label>
+                  <label>
+                    Subject
+                    <input
+                      value={moduleSubject}
+                      onChange={(e) => setModuleSubject(e.target.value)}
+                      disabled={!selected}
+                    />
+                  </label>
+                  <label>
+                    Description
+                    <textarea
+                      value={moduleDescription}
+                      onChange={(e) => setModuleDescription(e.target.value)}
+                      disabled={!selected}
+                    />
+                  </label>
+                  <div className="control-grid">
+                    <label>
+                      Difficulty
+                      <select
+                        value={moduleDifficulty}
+                        onChange={(e) =>
+                          setModuleDifficulty(e.target.value as Difficulty)
+                        }
+                      >
+                        <option>Foundation</option>
+                        <option>Standard</option>
+                        <option>Challenge</option>
+                      </select>
+                    </label>
+                    <label>
+                      Questions
+                      <input
+                        type="number"
+                        min="1"
+                        max="50"
+                        value={moduleQuestions}
+                        onChange={(e) =>
+                          setModuleQuestions(Number(e.target.value))
+                        }
+                      />
+                    </label>
+                    <label>
+                      Minutes
+                      <input
+                        type="number"
+                        min="1"
+                        max="300"
+                        value={moduleTime}
+                        onChange={(e) => setModuleTime(Number(e.target.value))}
+                      />
+                    </label>
+                    <label>
+                      Attempts
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={moduleAttempts}
+                        onChange={(e) =>
+                          setModuleAttempts(Number(e.target.value))
+                        }
+                      />
+                    </label>
+                    <label>
+                      Pass mark (%)
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={modulePassMark}
+                        onChange={(e) =>
+                          setModulePassMark(Number(e.target.value))
+                        }
+                      />
+                    </label>
+                  </div>
+                  <label>
+                    Examiner instructions / Prompt
+                    <textarea
+                      value={savedInstructions}
+                      onChange={(e) => setSavedInstructions(e.target.value)}
+                      disabled={!selected}
+                      placeholder="Example: Ask only from Chapters 2–4. Focus on definitions, comparisons and practical examples. Avoid historical questions."
+                    />
+                  </label>
+                  <small>
+                    These instructions guide question selection, but questions
+                    remain restricted to this test&apos;s attached documents.
+                  </small>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={!selected}
+                    onClick={updateModule}
+                  >
+                    Save module changes
+                  </button>
+                </div>
+              </>
+            )}
           </section>
         )}
       </div>
-      {mode === "existing" && (
+      {(mode === "existing" || mode === "assign") && (
         <section className="admin-topic-list">
-          <h2>Existing assignments</h2>
+          <h2>
+            {mode === "assign"
+              ? "Current student assignments"
+              : "Viva module overview"}
+          </h2>
           {topics.length ? (
             topics.map((t) => (
               <div className="assignment-group" key={t.id}>
@@ -2062,54 +2091,58 @@ function AdminPanel({ mode }: { mode: "create" | "existing" }) {
                       <span key={a.id}>
                         <b>{a.user?.full_name || "Student"}</b>
                         {a.user?.email}
-                        <button
-                          type="button"
-                          aria-label={`Remove ${a.user?.email}`}
-                          onClick={() => {
-                            setSelected(t.id);
-                            unassign(a.user_id, t.id);
-                          }}
-                        >
-                          ×
-                        </button>
+                        {mode === "assign" && (
+                          <button
+                            type="button"
+                            aria-label={`Remove ${a.user?.email}`}
+                            onClick={() => {
+                              setSelected(t.id);
+                              unassign(a.user_id, t.id);
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
                       </span>
                     ))
                   ) : (
                     <em>No students assigned</em>
                   )}
                 </div>
-                <div className="attempt-results">
-                  {t.attempts?.length ? (
-                    t.attempts.map((attempt) => (
-                      <div key={attempt.id}>
-                        <span>
-                          <b>
-                            {attempt.user?.full_name ||
-                              attempt.user?.email ||
-                              "Student"}
-                          </b>
-                          <small>
+                {mode === "existing" && (
+                  <div className="attempt-results">
+                    {t.attempts?.length ? (
+                      t.attempts.map((attempt) => (
+                        <div key={attempt.id}>
+                          <span>
+                            <b>
+                              {attempt.user?.full_name ||
+                                attempt.user?.email ||
+                                "Student"}
+                            </b>
+                            <small>
+                              {attempt.status === "completed"
+                                ? "Completed"
+                                : "In progress"}
+                            </small>
+                          </span>
+                          <strong>
                             {attempt.status === "completed"
-                              ? "Completed"
-                              : "In progress"}
-                          </small>
-                        </span>
-                        <strong>
-                          {attempt.status === "completed"
-                            ? `${Math.round(Number(attempt.score || 0))}%`
-                            : "—"}
-                        </strong>
-                        <time>
-                          {new Date(
-                            attempt.completed_at || attempt.started_at,
-                          ).toLocaleString()}
-                        </time>
-                      </div>
-                    ))
-                  ) : (
-                    <em>No attempts yet</em>
-                  )}
-                </div>
+                              ? `${Math.round(Number(attempt.score || 0))}%`
+                              : "—"}
+                          </strong>
+                          <time>
+                            {new Date(
+                              attempt.completed_at || attempt.started_at,
+                            ).toLocaleString()}
+                          </time>
+                        </div>
+                      ))
+                    ) : (
+                      <em>No attempts yet</em>
+                    )}
+                  </div>
+                )}
               </div>
             ))
           ) : (
