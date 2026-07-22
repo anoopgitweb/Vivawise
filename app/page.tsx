@@ -1507,6 +1507,35 @@ function AdminPanel({ mode }: { mode: "create" | "existing" }) {
     if (r.ok) load();
     event.target.value = "";
   }
+  async function manageDocument(
+    action: "retry_document" | "delete_document",
+    document: AdminDocument,
+  ) {
+    if (
+      action === "delete_document" &&
+      !window.confirm(`Delete ${document.file_name}? This cannot be undone.`)
+    )
+      return;
+    setMessage(
+      action === "retry_document"
+        ? "Retrying document indexing…"
+        : "Deleting document…",
+    );
+    const response = await fetch("/api/admin/topics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, documentId: document.id }),
+    });
+    const data = await response.json();
+    setMessage(
+      response.ok
+        ? action === "retry_document"
+          ? "Document indexed and ready for viva questions."
+          : "Document deleted."
+        : data.error || "Document operation failed.",
+    );
+    await load();
+  }
   useEffect(() => {
     const module = topics.find((topic) => topic.id === selected);
     setSavedInstructions(module?.instructions || "");
@@ -1808,9 +1837,33 @@ function AdminPanel({ mode }: { mode: "create" | "existing" }) {
                 topics
                   .find((topic) => topic.id === selected)!
                   .documents!.map((document) => (
-                    <span key={document.id}>
-                      <b>{document.file_name}</b>
+                    <span className="document-row" key={document.id}>
+                      <b title={document.error_message || undefined}>
+                        {document.file_name}
+                      </b>
                       <em className={document.status}>{document.status}</em>
+                      {document.status !== "ready" && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            manageDocument("retry_document", document)
+                          }
+                        >
+                          Retry
+                        </button>
+                      )}
+                      <button
+                        className="delete-document"
+                        type="button"
+                        onClick={() =>
+                          manageDocument("delete_document", document)
+                        }
+                      >
+                        Delete
+                      </button>
+                      {document.error_message && (
+                        <small>{document.error_message}</small>
+                      )}
                     </span>
                   ))
               ) : (

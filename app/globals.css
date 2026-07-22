@@ -2268,6 +2268,33 @@ button {
 .module-documents em.ready {
   color: var(--teal);
 }
+.module-documents .document-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+}
+.document-row b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.document-row button {
+  border: 0;
+  background: transparent;
+  color: var(--teal);
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 700;
+  padding: 3px;
+}
+.document-row button.delete-document {
+  color: #a64f43;
+}
+.document-row small {
+  grid-column: 1 / -1;
+  color: #a64f43;
+  overflow-wrap: anywhere;
+}
 .assigned-users > span {
   position: relative;
   padding-right: 28px;

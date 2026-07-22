@@ -1,6 +1,8 @@
 import {
   attachFile,
   createTopicVectorStore,
+  deleteKnowledgeFile,
+  detachFile,
   uploadKnowledgeFile,
 } from "../../../../lib/openai";
 import { requireSupabaseAdmin, supabaseAdmin } from "../../../../lib/supabase";
@@ -151,6 +153,7 @@ export async function POST(request: Request) {
       answerMode?: string;
       instructions?: string;
       groundingMode?: string;
+      documentId?: string;
     };
     if (body.action === "create") {
       const { data, error } = await sb
@@ -262,6 +265,104 @@ export async function POST(request: Request) {
         .eq("test_id", body.topicId)
         .eq("user_id", body.userId);
       if (error) throw error;
+      return Response.json({ ok: true });
+    }
+    if (body.action === "retry_document") {
+      if (!body.documentId)
+        return Response.json({ error: "Choose a document." }, { status: 400 });
+      const { data: document, error: documentError } = await sb
+        .from("test_documents")
+        .select("id,test_id,file_name,storage_path,mime_type,openai_file_id")
+        .eq("id", body.documentId)
+        .single();
+      if (documentError || !document)
+        return Response.json({ error: "Document not found." }, { status: 404 });
+      const { data: test, error: testError } = await sb
+        .from("tests")
+        .select("id,name,openai_vector_store_id")
+        .eq("id", document.test_id)
+        .single();
+      if (testError || !test) throw testError || new Error("Test not found.");
+      await sb
+        .from("test_documents")
+        .update({ status: "processing", error_message: null })
+        .eq("id", document.id);
+      try {
+        let vectorId = test.openai_vector_store_id as string | null;
+        if (!vectorId) {
+          vectorId = await createTopicVectorStore(test.id, test.name);
+          await sb
+            .from("tests")
+            .update({ openai_vector_store_id: vectorId })
+            .eq("id", test.id);
+        }
+        let openaiFileId = document.openai_file_id as string | null;
+        if (!openaiFileId) {
+          const { data: blob, error: downloadError } = await sb.storage
+            .from("test-documents")
+            .download(document.storage_path);
+          if (downloadError || !blob)
+            throw (
+              downloadError || new Error("Stored document could not be read.")
+            );
+          openaiFileId = await uploadKnowledgeFile(
+            new File([blob], document.file_name, { type: document.mime_type }),
+          );
+        }
+        await attachFile(vectorId, openaiFileId);
+        await sb
+          .from("test_documents")
+          .update({
+            status: "ready",
+            error_message: null,
+            openai_file_id: openaiFileId,
+          })
+          .eq("id", document.id);
+        return Response.json({ ok: true });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Indexing failed.";
+        await sb
+          .from("test_documents")
+          .update({ status: "failed", error_message: message })
+          .eq("id", document.id);
+        return Response.json({ error: message }, { status: 502 });
+      }
+    }
+    if (body.action === "delete_document") {
+      if (!body.documentId)
+        return Response.json({ error: "Choose a document." }, { status: 400 });
+      const { data: document, error: documentError } = await sb
+        .from("test_documents")
+        .select("id,test_id,storage_path,openai_file_id")
+        .eq("id", body.documentId)
+        .single();
+      if (documentError || !document)
+        return Response.json({ error: "Document not found." }, { status: 404 });
+      const { data: test } = await sb
+        .from("tests")
+        .select("openai_vector_store_id")
+        .eq("id", document.test_id)
+        .single();
+      if (document.openai_file_id) {
+        if (test?.openai_vector_store_id)
+          await detachFile(
+            test.openai_vector_store_id,
+            document.openai_file_id,
+          ).catch(() => undefined);
+        await deleteKnowledgeFile(document.openai_file_id).catch(
+          () => undefined,
+        );
+      }
+      const { error: storageError } = await sb.storage
+        .from("test-documents")
+        .remove([document.storage_path]);
+      if (storageError) throw storageError;
+      const { error: deleteError } = await sb
+        .from("test_documents")
+        .delete()
+        .eq("id", document.id);
+      if (deleteError) throw deleteError;
       return Response.json({ ok: true });
     }
     return Response.json({ error: "Unknown action." }, { status: 400 });
