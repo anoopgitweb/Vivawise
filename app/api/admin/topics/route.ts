@@ -95,6 +95,22 @@ export async function POST(request: Request) {
         .from("test-documents")
         .upload(path, bytes, { contentType: file.type, upsert: false });
       if (storageError) throw storageError;
+      const { error: recordError } = await sb.from("test_documents").insert({
+        id,
+        test_id: testId,
+        file_name: file.name,
+        storage_path: path,
+        mime_type: file.type || "application/octet-stream",
+        size_bytes: file.size,
+        openai_file_id: null,
+        status: "processing",
+        error_message: null,
+        uploaded_by: user.id,
+      });
+      if (recordError) {
+        await sb.storage.from("test-documents").remove([path]);
+        throw recordError;
+      }
       let vectorId = test.openai_vector_store_id as string | null;
       let openaiFileId: string | null = null;
       let status = "pending",
@@ -114,21 +130,18 @@ export async function POST(request: Request) {
         await attachFile(vectorId, openaiFileId);
         status = "ready";
       } catch (error) {
+        status = "failed";
         errorMessage =
           error instanceof Error ? error.message : "OpenAI indexing pending";
       }
-      const { error } = await sb.from("test_documents").insert({
-        id,
-        test_id: testId,
-        file_name: file.name,
-        storage_path: path,
-        mime_type: file.type || "application/octet-stream",
-        size_bytes: file.size,
-        openai_file_id: openaiFileId,
-        status,
-        error_message: errorMessage,
-        uploaded_by: user.id,
-      });
+      const { error } = await sb
+        .from("test_documents")
+        .update({
+          openai_file_id: openaiFileId,
+          status,
+          error_message: errorMessage,
+        })
+        .eq("id", id);
       if (error) throw error;
       return Response.json({ ok: true, status });
     }
